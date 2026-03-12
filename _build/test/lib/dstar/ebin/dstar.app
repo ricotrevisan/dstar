@@ -1,1 +1,0 @@
-{application,dstar,[{modules,['Elixir.Dstar','Elixir.Dstar.Actions','Elixir.Dstar.Elements','Elixir.Dstar.Plugs.Dispatch','Elixir.Dstar.SSE','Elixir.Dstar.Signals']},{optional_applications,[]},{applications,[kernel,stdlib,elixir,logger,plug,jason]},{description,"A simplified Datastar implementation for Elixir using pure Plugs"},{registered,[]},{vsn,"0.1.0"}]}.
