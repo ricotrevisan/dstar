@@ -1,7 +1,7 @@
 defmodule Dstar.MixProject do
   use Mix.Project
 
-  @version "0.0.2"
+  @version "0.0.3"
   @source_url "https://github.com/ricotrevisan/dstar"
 
   def project do
@@ -36,7 +36,7 @@ defmodule Dstar.MixProject do
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
       maintainers: ["Rico Trevisan"],
-      files: ~w(lib docs .formatter.exs mix.exs README.md LICENSE)
+      files: ~w(lib docs usage-rules.md usage-rules .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
@@ -45,7 +45,7 @@ defmodule Dstar.MixProject do
       main: "Dstar",
       source_url: @source_url,
       source_ref: "v#{@version}",
-      extras: ["README.md", "docs/migrating-from-phoenix-datastar.md"],
+      extras: ["README.md", "CHANGELOG.md", "docs/migrating-from-phoenix-datastar.md"],
       groups_for_modules: [
         Core: [Dstar, Dstar.SSE, Dstar.Signals, Dstar.Elements, Dstar.Actions, Dstar.Scripts],
         Plugs: [Dstar.Plugs.Dispatch, Dstar.Plugs.RenameCsrfParam]

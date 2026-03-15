@@ -1,0 +1,355 @@
+# Dstar API Patterns
+
+Copy-pasteable code examples for common Dstar use cases.
+
+## Stateless Counter
+
+**Controller:**
+```elixir
+defmodule MyAppWeb.CounterController do
+  use MyAppWeb, :controller
+  
+  def increment(conn, _params) do
+    signals = Dstar.read_signals(conn)
+    count = (signals["count"] || 0) + 1
+    
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_signals(%{count: count})
+  end
+  
+  def decrement(conn, _params) do
+    signals = Dstar.read_signals(conn)
+    count = max((signals["count"] || 0) - 1, 0)
+    
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_signals(%{count: count})
+  end
+end
+```
+
+**Template:**
+```heex
+<div data-signals:count="0">
+  <p>Count: <span data-text="$count"></span></p>
+  <button data-on:click="@post('/counter/increment')">+</button>
+  <button data-on:click="@post('/counter/decrement')">-</button>
+</div>
+```
+
+## DOM Patching with Server-Rendered HTML
+
+**Controller:**
+```elixir
+defmodule MyAppWeb.TodoController do
+  use MyAppWeb, :controller
+  
+  def add_todo(conn, _params) do
+    signals = Dstar.read_signals(conn)
+    
+    todo = %{
+      id: UUID.uuid4(),
+      text: signals["new_todo"],
+      done: false
+    }
+    
+    # Persist
+    {:ok, _} = Todos.create_todo(todo)
+    
+    # Render partial
+    html = Phoenix.Template.render_to_string(
+      MyAppWeb.TodoView,
+      "todo_item.html",
+      todo: todo
+    )
+    
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_elements(html, selector: "#todo-list", mode: :append)
+    |> Dstar.patch_signals(%{new_todo: ""})
+  end
+  
+  def delete_todo(conn, _params) do
+    signals = Dstar.read_signals(conn)
+    todo_id = signals["deleting_id"]
+    
+    {:ok, _} = Todos.delete_todo(todo_id)
+    
+    conn
+    |> Dstar.start()
+    |> Dstar.remove_elements("#todo-#{todo_id}")
+  end
+end
+```
+
+**Partial (todo_item.html.heex):**
+```heex
+<li id={"todo-#{@todo.id}"} class="todo-item">
+  <span><%= @todo.text %></span>
+  <button data-signals:deleting_id={"'#{@todo.id}'"}
+          data-on:click="@post('/todos/delete')">
+    Delete
+  </button>
+</li>
+```
+
+## Real-time Streaming
+
+**Controller:**
+```elixir
+defmodule MyAppWeb.FeedController do
+  use MyAppWeb, :controller
+  
+  def live_feed(conn, _params) do
+    user_id = conn.assigns.current_user.id
+    
+    # Subscribe BEFORE start
+    Phoenix.PubSub.subscribe(MyApp.PubSub, "feed:#{user_id}")
+    
+    # Open SSE connection
+    conn = Dstar.start(conn)
+    
+    # Enter receive loop
+    stream_loop(conn)
+  end
+  
+  defp stream_loop(conn) do
+    receive do
+      {:new_message, message} ->
+        conn = Dstar.patch_signals(conn, %{
+          latest_message: message.text,
+          message_count: message.total_count
+        })
+        stream_loop(conn)
+      
+      {:notification, notification} ->
+        html = Phoenix.Template.render_to_string(
+          MyAppWeb.NotificationView,
+          "notification.html",
+          notification: notification
+        )
+        
+        conn = Dstar.patch_elements(
+          conn,
+          html,
+          selector: "#notifications",
+          mode: :prepend
+        )
+        stream_loop(conn)
+    end
+  end
+end
+```
+
+**Template:**
+```heex
+<div data-init="@post('/feed/live', {retryMaxCount: Infinity})"
+     data-on:online__window="@post('/feed/live', {retryMaxCount: Infinity})"
+     data-signals:latest_message="''"
+     data-signals:message_count="0">
+  
+  <div id="notifications" class="notifications"></div>
+  
+  <div class="status">
+    <p data-text="$latest_message"></p>
+    <span data-text="`${$message_count} messages`"></span>
+  </div>
+</div>
+```
+
+## Dispatch Handler Module
+
+**Router:**
+```elixir
+post "/ds/:module/:event", Dstar.Plugs.Dispatch,
+  modules: [MyApp.Handlers.SearchHandler]
+```
+
+**Handler:**
+```elixir
+defmodule MyApp.Handlers.SearchHandler do
+  @moduledoc """
+  Handles search events via Dstar.Plugs.Dispatch
+  """
+  
+  def handle_event(conn, "search", signals) do
+    query = signals["query"] || ""
+    
+    results = if String.length(query) >= 2 do
+      MyApp.Search.search(query, limit: 10)
+    else
+      []
+    end
+    
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_signals(%{
+      results: results,
+      loading: false
+    })
+  end
+  
+  def handle_event(conn, "clear", _signals) do
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_signals(%{
+      query: "",
+      results: [],
+      loading: false
+    })
+  end
+end
+```
+
+**Template:**
+```heex
+<div data-signals:query="''"
+     data-signals:results="[]"
+     data-signals:loading="false">
+  
+  <input type="search"
+         data-model="query"
+         data-on:input={Dstar.event(SearchHandler, "search")}
+         placeholder="Search...">
+  
+  <button data-on:click={Dstar.event(SearchHandler, "clear")}>
+    Clear
+  </button>
+  
+  <div data-show="$loading">Searching...</div>
+  
+  <ul>
+    <template data-for="result in $results">
+      <li data-text="result.title"></li>
+    </template>
+  </ul>
+</div>
+```
+
+## CSRF Setup
+
+### Header-based (Recommended)
+
+**Root Layout (root.html.heex):**
+```heex
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="csrf-token" content={get_csrf_token()} />
+  <script src="/assets/datastar.js"></script>
+</head>
+<body data-signals:_csrf-token={"'#{get_csrf_token()}'"}>
+  <%= @inner_content %>
+</body>
+</html>
+```
+
+`Dstar.event/2,3` automatically includes `_csrf-token` in headers.
+
+### Form-compatible
+
+**Router (plug goes before `:protect_from_forgery`):**
+```elixir
+pipeline :browser do
+  plug :accepts, ["html"]
+  plug :fetch_session
+  plug :fetch_flash
+  plug Dstar.Plugs.RenameCsrfParam  # safely no-ops when param isn't present
+  plug :protect_from_forgery
+  plug :put_secure_browser_headers
+end
+```
+
+**Layout:**
+```heex
+<body data-signals:csrf={"'#{get_csrf_token()}'"}>
+```
+
+## Multiple Patches in One Response
+
+```elixir
+def complex_update(conn, _params) do
+  signals = Dstar.read_signals(conn)
+  
+  # Process data
+  result = process_data(signals["input"])
+  
+  # Render HTML fragment
+  html = Phoenix.Template.render_to_string(
+    MyAppWeb.ResultView,
+    "result.html",
+    result: result
+  )
+  
+  # Chain multiple updates
+  conn
+  |> Dstar.start()
+  |> Dstar.patch_signals(%{
+    processing: false,
+    last_update: DateTime.utc_now() |> to_string(),
+    result_count: length(result.items)
+  })
+  |> Dstar.patch_elements(html, selector: "#results", mode: :inner)
+  |> Dstar.console_log("Update complete", level: :info)
+end
+```
+
+## Form with Validation
+
+**Controller:**
+```elixir
+def submit_form(conn, _params) do
+  signals = Dstar.read_signals(conn)
+  
+  changeset = User.changeset(%User{}, %{
+    name: signals["name"],
+    email: signals["email"]
+  })
+  
+  case Repo.insert(changeset) do
+    {:ok, user} ->
+      conn
+      |> Dstar.start()
+      |> Dstar.patch_signals(%{
+        success: "User created!",
+        errors: %{},
+        name: "",
+        email: ""
+      })
+    
+    {:error, %Ecto.Changeset{} = changeset} ->
+      errors = changeset
+      |> Ecto.Changeset.traverse_errors(fn {msg, _opts} -> msg end)
+      
+      conn
+      |> Dstar.start()
+      |> Dstar.patch_signals(%{
+        errors: errors,
+        success: ""
+      })
+  end
+end
+```
+
+**Template:**
+```heex
+<div data-signals:name="''"
+     data-signals:email="''"
+     data-signals:errors="{}"
+     data-signals:success="''">
+  
+  <div data-show="$success" data-text="$success" class="success"></div>
+  
+  <input type="text" data-model="name" placeholder="Name">
+  <div data-show="$errors.name" data-text="$errors.name" class="error"></div>
+  
+  <input type="email" data-model="email" placeholder="Email">
+  <div data-show="$errors.email" data-text="$errors.email" class="error"></div>
+  
+  <button data-on:click="@post('/users/create')">
+    Submit
+  </button>
+</div>
+```

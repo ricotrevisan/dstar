@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.3 — 2026-03-15
+
+### Added
+
+- **UsageRules integration** — ships `usage-rules.md`, streaming sub-rule, and
+  a pre-built `use-dstar` skill with API patterns reference. Consumers using
+  the `usage_rules` package can pull these in automatically.
+
+### Changed
+
+- **README rewrite** — new Quick Start walks through routes → controller →
+  event handler → template, showing `patch_signals`, `patch_elements`,
+  `execute_script`, and `console_log` in one cohesive counter example.
+  Dispatch is now the primary routing pattern; plain controller routes shown
+  as an alternative in "Without Dispatch" section.
+
 ## 0.0.2 — 2026-03-15
 
 ### Added

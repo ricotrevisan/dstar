@@ -2,3 +2,4 @@ _build
 deps
 doc
 plans
+*.tar

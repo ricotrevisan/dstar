@@ -22,7 +22,7 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "~> 0.0.1"}
+    {:dstar, "~> 0.0.3"}
   ]
 end
 ```
@@ -37,46 +37,134 @@ That's it. No generators, no config, no application callback.
 
 ## Quick Start
 
-### 1. A controller action
+A counter with increment, decrement, and reset — enough to show every primitive.
+
+### 1. Routes
+
+```elixir
+# router.ex
+
+# Page render — normal Phoenix controller
+get "/counter", CounterController, :show
+
+# All Datastar events — single dispatch route
+post "/ds/:module/:event", Dstar.Plugs.Dispatch,
+  modules: [MyAppWeb.CounterEvents]
+```
+
+Two routes. The `GET` renders HTML. The `POST` dispatches Datastar events
+to an allowlisted handler module. That's the entire wiring.
+
+### 2. Controller — renders the page
 
 ```elixir
 defmodule MyAppWeb.CounterController do
   use MyAppWeb, :controller
 
-  # Render the page — normal Phoenix
   def show(conn, _params) do
     render(conn, :counter)
   end
+end
+```
 
-  # Handle a Datastar event — read signals, do work, send patches
-  def increment(conn, _params) do
-    signals = Dstar.read_signals(conn)
+No SSE logic here. This is a plain Phoenix controller that serves HTML.
+
+### 3. Event handler — reacts to Datastar actions
+
+```elixir
+defmodule MyAppWeb.CounterEvents do
+  def handle_event(conn, "increment", signals) do
     count = (signals["count"] || 0) + 1
 
     conn
     |> Dstar.start()
     |> Dstar.patch_signals(%{count: count})
+    |> Dstar.patch_elements(
+      ~s(<span id="history">Last: +1 → #{count}</span>),
+      selector: "#history"
+    )
+  end
+
+  def handle_event(conn, "decrement", signals) do
+    count = max((signals["count"] || 0) - 1, 0)
+
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_signals(%{count: count})
+    |> Dstar.patch_elements(
+      ~s(<span id="history">Last: -1 → #{count}</span>),
+      selector: "#history"
+    )
+  end
+
+  def handle_event(conn, "reset", _signals) do
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_signals(%{count: 0})
+    |> Dstar.patch_elements(
+      ~s(<span id="history">Reset</span>),
+      selector: "#history"
+    )
+    |> Dstar.execute_script("""
+    document.getElementById('history').animate(
+      [{opacity: 0}, {opacity: 1}],
+      {duration: 300}
+    )
+    """)
+    |> Dstar.console_log("Counter reset")
   end
 end
 ```
 
-### 2. A template
+Pattern-match on event name. Read signals, do work, pipe SSE patches back.
+`increment` and `decrement` update both the reactive signal *and* a DOM element.
+`reset` also runs a JS animation and logs to the browser console — all from
+the same pipeline.
+
+### 4. Template
 
 ```heex
+<%# counter.html.heex %>
+
 <div data-signals:count="0">
-  <span data-text="$count"></span>
-  <button data-on:click="@post('/counter/increment')">+1</button>
+  <h1 data-text="$count">0</h1>
+
+  <span id="history">—</span>
+
+  <button data-on:click={Dstar.event(MyAppWeb.CounterEvents, "increment")}>
+    +1
+  </button>
+
+  <button data-on:click={Dstar.event(MyAppWeb.CounterEvents, "decrement")}>
+    −1
+  </button>
+
+  <button data-on:click={Dstar.event(MyAppWeb.CounterEvents, "reset")}>
+    Reset
+  </button>
 </div>
 ```
 
-### 3. Routes
+`Dstar.event/2` generates the `@post(...)` expression with CSRF headers —
+you never hand-write URLs. Datastar handles the rest client-side.
 
-```elixir
-get "/counter", CounterController, :show
-post "/counter/increment", CounterController, :increment
-```
+### What just happened?
 
-No mount, no socket, no `handle_event` callback. Read the signals, do math, send a patch. A junior dev reads this and understands it in 30 seconds.
+| Layer | Concern |
+| --- | --- |
+| **Router** | `GET` → controller, `POST /ds/*` → dispatch |
+| **Controller** | Renders HTML. No SSE awareness. |
+| **Handler** | Pure `handle_event/3` functions. Reads signals, pipes SSE responses. |
+| **Template** | Standard HEEx + Datastar attributes. `Dstar.event/2` wires the buttons. |
+
+Three Dstar primitives covered:
+
+- **`patch_signals`** — update reactive client state
+- **`patch_elements`** — patch DOM elements by CSS selector
+- **`execute_script`** / **`console_log`** — run JS on the client
+
+No GenServers. No processes. No macros. Just functions that format SSE events
+and send them over a `Plug.Conn`.
 
 ## Core API
 
@@ -227,33 +315,34 @@ network returns.
 
 The library provides the SSE plumbing. Your app provides the PubSub topic and the business logic.
 
-## Dynamic Dispatch (Optional)
+## Without Dispatch
 
-If you'd rather have one route handle all Datastar events, use `Dstar.Plugs.Dispatch`:
+The Quick Start uses `Dstar.Plugs.Dispatch` to route events, but you can
+skip it entirely and use plain controller actions:
 
 ```elixir
-# Router
-post "/ds/:module/:event", Dstar.Plugs.Dispatch, modules: [
-  MyAppWeb.CounterHandler,
-  MyAppWeb.TodoHandler
-]
+# router.ex
+post "/counter/increment", CounterController, :increment
 ```
 
-Handler modules are plain modules with a `handle_event/3` function:
-
 ```elixir
-defmodule MyAppWeb.CounterHandler do
-  def handle_event(conn, "increment", signals) do
-    count = (signals["count"] || 0) + 1
+# controller
+def increment(conn, _params) do
+  signals = Dstar.read_signals(conn)
+  count = (signals["count"] || 0) + 1
 
-    conn
-    |> Dstar.start()
-    |> Dstar.patch_signals(%{count: count})
-  end
+  conn
+  |> Dstar.start()
+  |> Dstar.patch_signals(%{count: count})
 end
 ```
 
-The `:modules` option is an allowlist — only listed modules can be dispatched to.
+```heex
+<button data-on:click="@post('/counter/increment')">+1</button>
+```
+
+Dispatch gives you convention and a single route. Plain controllers give
+you full routing control. Both use the same Dstar functions underneath.
 
 ## CSRF Protection Setup
 
