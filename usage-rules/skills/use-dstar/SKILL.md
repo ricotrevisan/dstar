@@ -48,11 +48,13 @@ end
 - `Dstar.redirect(conn, "/path")`
 - `Dstar.console_log(conn, "Debug info", level: :warn)` — Levels: `:log`, `:warn`, `:error`, `:info`, `:debug`
 
-### Event Helpers
+### HTTP Verb Helpers
 
-- `Dstar.event(MyHandler, "increment")` → `"@post('/ds/my_handler/increment', {...})"`
-- `Dstar.event(MyHandler, "save", prefix: "/workspace")` — URL prefix
-- `Dstar.event("increment")` — Dynamic module (reads `$_dstar_module` signal from client)
+- `Dstar.post(MyHandler, "increment")` → `"@post('/ds/my_handler/increment', {...})"`
+- `Dstar.delete(MyHandler, "remove")` → `"@delete('/ds/my_handler/remove', {...})"`
+- `Dstar.post(MyHandler, "save", prefix: "/workspace")` — URL prefix
+- `Dstar.post("increment")` — Dynamic module (reads `$_dstar_module` signal from client)
+- All HTTP verbs available: `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`
 
 ## Controller Patterns
 
@@ -123,7 +125,7 @@ data-signals:items="[]"          <%!-- Array --%>
 ```heex
 <div data-signals:count="0">
   <p>Count: <span data-text="$count"></span></p>
-  <button data-on:click={Dstar.event(CounterHandler, "increment")}>
+  <button data-on:click={Dstar.post(CounterHandler, "increment")}>
     Increment
   </button>
 </div>
@@ -136,7 +138,7 @@ data-signals:items="[]"          <%!-- Array --%>
      data-signals:email="''">
   <input type="text" data-model="name" placeholder="Name">
   <input type="email" data-model="email" placeholder="Email">
-  <button data-on:click={Dstar.event(FormHandler, "submit")}>
+  <button data-on:click={Dstar.post(FormHandler, "submit")}>
     Submit
   </button>
   
@@ -152,7 +154,7 @@ data-signals:items="[]"          <%!-- Array --%>
   <div data-show="$loading">Loading...</div>
   <div data-show="$error" data-text="$error" class="error"></div>
   <button data-show="!$loading"
-          data-on:click={Dstar.event(DataHandler, "load")}>
+          data-on:click={Dstar.post(DataHandler, "load")}>
     Load Data
   </button>
 </div>
@@ -183,7 +185,7 @@ data-signals:items="[]"          <%!-- Array --%>
 </body>
 ```
 
-Client-only signal (prefix `_`) sent as `x-csrf-token` header. `Dstar.event/2,3` includes it automatically.
+Client-only signal (prefix `_`) sent as `x-csrf-token` header. Dstar's verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) include it automatically.
 
 ### Form-compatible (mixed SSE + regular form routes)
 
@@ -233,7 +235,7 @@ end
 
 **Template:**
 ```heex
-<button data-on:click={Dstar.event(TodoHandler, "add")}>
+<button data-on:click={Dstar.post(TodoHandler, "add")}>
   Add Todo
 </button>
 ```
@@ -294,6 +296,15 @@ conn
 |> Dstar.start()
 |> Dstar.patch_signals(%{loading: false})
 |> Dstar.patch_elements("<p>Done!</p>", selector: "#status")
+|> Dstar.console_log("Operation complete")
+```
+
+All patches sent in one SSE stream.
+g("Operation complete")
+```
+
+All patches sent in one SSE stream.
+or: "#status")
 |> Dstar.console_log("Operation complete")
 ```
 

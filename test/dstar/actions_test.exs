@@ -35,31 +35,57 @@ defmodule Dstar.ActionsTest do
 
   @csrf_opts "{headers: {'x-csrf-token': $_csrfToken}}"
 
-  describe "event/2 with module" do
-    test "generates a post action with encoded module and CSRF header" do
-      result = Actions.event(MyApp.CounterView, "increment")
-      encoded = Actions.encode_module(MyApp.CounterView)
-      assert result == "@post('/ds/#{encoded}/increment', #{@csrf_opts})"
+  # ── Verb helpers ──────────────────────────────────────────────────────
+
+  for verb <- ~w(post get put patch delete)a do
+    verb_str = Atom.to_string(verb)
+
+    describe "#{verb}/2 with module" do
+      test "generates a #{verb_str} action with encoded module and CSRF header" do
+        result = apply(Actions, unquote(verb), [MyApp.CounterView, "increment"])
+        encoded = Actions.encode_module(MyApp.CounterView)
+        assert result == "@#{unquote(verb_str)}('/ds/#{encoded}/increment', #{@csrf_opts})"
+      end
+    end
+
+    describe "#{verb}/3 with prefix" do
+      test "generates a #{verb_str} action with prefix and CSRF header" do
+        result = apply(Actions, unquote(verb), [MyApp.CounterView, "increment", [prefix: "/ws"]])
+        encoded = Actions.encode_module(MyApp.CounterView)
+        assert result == "@#{unquote(verb_str)}('/ws/ds/#{encoded}/increment', #{@csrf_opts})"
+      end
+    end
+
+    describe "#{verb}/1 dynamic" do
+      test "generates a #{verb_str} action with dynamic module signal and CSRF header" do
+        result = apply(Actions, unquote(verb), ["increment"])
+        assert result == "@#{unquote(verb_str)}('/ds/' + $_dstar_module + '/increment', #{@csrf_opts})"
+      end
+
+      test "generates #{verb_str} with custom module signal and CSRF header" do
+        result = apply(Actions, unquote(verb), ["save", [module: "my_module"]])
+        assert result == "@#{unquote(verb_str)}('/ds/my_module/save', #{@csrf_opts})"
+      end
     end
   end
 
-  describe "event/3 with prefix" do
-    test "generates a post action with prefix and CSRF header" do
-      result = Actions.event(MyApp.CounterView, "increment", prefix: "/ws")
-      encoded = Actions.encode_module(MyApp.CounterView)
-      assert result == "@post('/ws/ds/#{encoded}/increment', #{@csrf_opts})"
+  # ── Deprecated event/2,3 still works ─────────────────────────────────
+
+  describe "event/2 (deprecated)" do
+    test "delegates to post/2" do
+      assert Actions.event(MyApp.CounterView, "increment") ==
+               Actions.post(MyApp.CounterView, "increment")
+    end
+
+    test "dynamic delegates to post/1" do
+      assert Actions.event("increment") == Actions.post("increment")
     end
   end
 
-  describe "event/1 dynamic" do
-    test "generates a post action with dynamic module signal and CSRF header" do
-      result = Actions.event("increment")
-      assert result == "@post('/ds/' + $_dstar_module + '/increment', #{@csrf_opts})"
-    end
-
-    test "generates with custom module signal and CSRF header" do
-      result = Actions.event("save", module: "my_module")
-      assert result == "@post('/ds/my_module/save', #{@csrf_opts})"
+  describe "event/3 (deprecated)" do
+    test "delegates to post/3" do
+      assert Actions.event(MyApp.CounterView, "save", prefix: "/ws") ==
+               Actions.post(MyApp.CounterView, "save", prefix: "/ws")
     end
   end
 end

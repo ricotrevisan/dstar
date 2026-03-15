@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.4 — 2026-03-15
+
+### Added
+
+- **HTTP verb helpers** — `Dstar.post/2,3`, `Dstar.get/2,3`, `Dstar.put/2,3`,
+  `Dstar.patch/2,3`, `Dstar.delete/2,3` generate `@verb(...)` expressions for
+  Datastar attributes. Same API across all verbs.
+
+### Deprecated
+
+- `Dstar.event/2,3` — use `Dstar.post/2,3` (or the appropriate verb) instead.
+  Still works, will be removed in a future version.
+
 ## 0.0.3 — 2026-03-15
 
 ### Added

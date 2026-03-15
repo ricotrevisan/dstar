@@ -22,7 +22,7 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "~> 0.0.3"}
+    {:dstar, "~> 0.0.4"}
   ]
 end
 ```
@@ -131,22 +131,23 @@ the same pipeline.
 
   <span id="history">—</span>
 
-  <button data-on:click={Dstar.event(MyAppWeb.CounterEvents, "increment")}>
+  <button data-on:click={Dstar.post(MyAppWeb.CounterEvents, "increment")}>
     +1
   </button>
 
-  <button data-on:click={Dstar.event(MyAppWeb.CounterEvents, "decrement")}>
+  <button data-on:click={Dstar.post(MyAppWeb.CounterEvents, "decrement")}>
     −1
   </button>
 
-  <button data-on:click={Dstar.event(MyAppWeb.CounterEvents, "reset")}>
+  <button data-on:click={Dstar.post(MyAppWeb.CounterEvents, "reset")}>
     Reset
   </button>
 </div>
 ```
 
-`Dstar.event/2` generates the `@post(...)` expression with CSRF headers —
-you never hand-write URLs. Datastar handles the rest client-side.
+`Dstar.post/2` pairs with `Dstar.Plugs.Dispatch` — it generates the
+`@post(...)` expression with the correct path and CSRF headers so you
+never hand-write URLs. One dispatch route, as many handlers as you want.
 
 ### What just happened?
 
@@ -155,7 +156,7 @@ you never hand-write URLs. Datastar handles the rest client-side.
 | **Router** | `GET` → controller, `POST /ds/*` → dispatch |
 | **Controller** | Renders HTML. No SSE awareness. |
 | **Handler** | Pure `handle_event/3` functions. Reads signals, pipes SSE responses. |
-| **Template** | Standard HEEx + Datastar attributes. `Dstar.event/2` wires the buttons. |
+| **Template** | Standard HEEx + Datastar attributes. `Dstar.post/2` wires the buttons. |
 
 Three Dstar primitives covered:
 
@@ -227,13 +228,16 @@ Sends a `datastar-patch-elements` event that removes matching elements.
 conn |> Dstar.remove_elements("#flash-message")
 ```
 
-### `Dstar.event(module, event_name)` → `String.t()`
+### `Dstar.post(module, event_name)` → `String.t()`
 
-Generates a `@post(...)` expression for use in Datastar attributes.
+Generates a `@post(...)` expression for use in Datastar attributes. All HTTP verbs are available: `Dstar.get/2,3`, `Dstar.put/2,3`, `Dstar.patch/2,3`, `Dstar.delete/2,3` — they all follow the same API.
 
 ```elixir
-Dstar.event(MyAppWeb.CounterHandler, "increment")
+Dstar.post(MyAppWeb.CounterHandler, "increment")
 # => "@post('/ds/my_app_web-counter_handler/increment', {headers: {'x-csrf-token': $_csrfToken}})"
+
+Dstar.delete(MyAppWeb.TodoHandler, "remove")
+# => "@delete('/ds/my_app_web-todo_handler/remove', {headers: {'x-csrf-token': $_csrfToken}})"
 ```
 
 Also supports dynamic module references and URL prefixes. See `Dstar.Actions` docs for details.
@@ -399,3 +403,4 @@ Just two:
 ## License
 
 MIT
+T

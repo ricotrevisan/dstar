@@ -1,7 +1,7 @@
 defmodule Dstar.MixProject do
   use Mix.Project
 
-  @version "0.0.3"
+  @version "0.0.4"
   @source_url "https://github.com/ricotrevisan/dstar"
 
   def project do

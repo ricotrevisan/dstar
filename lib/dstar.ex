@@ -87,18 +87,52 @@ defmodule Dstar do
     Dstar.Elements.remove(conn, selector, opts)
   end
 
+  # ── HTTP verb helpers ─────────────────────────────────────────────────
+
   @doc """
-  Generates an event `@post(...)` expression for Datastar attributes.
+  Generates a `@post(...)` expression for Datastar attributes.
 
   ## Examples
 
-      Dstar.event(MyAppWeb.CounterHandler, "increment")
-      # => "@post('/ds/' + $_dstar_module + '/increment')"
+      Dstar.post(MyAppWeb.CounterHandler, "increment")
+      # => "@post('/ds/my_app_web-counter_handler/increment', {headers: ...})"
 
-      Dstar.event("increment")
-      # => "@post('/ds/' + $_dstar_module + '/increment')"
+      Dstar.post("increment")
+      # => "@post('/ds/' + $_dstar_module + '/increment', {headers: ...})"
 
   """
+  defdelegate post(module_or_name, name_or_opts \\ []), to: Dstar.Actions
+  defdelegate post(module, event_name, opts), to: Dstar.Actions
+
+  @doc """
+  Generates a `@get(...)` expression for Datastar attributes.
+  See `Dstar.post/2` for usage — same API, different HTTP verb.
+  """
+  defdelegate get(module_or_name, name_or_opts \\ []), to: Dstar.Actions
+  defdelegate get(module, event_name, opts), to: Dstar.Actions
+
+  @doc """
+  Generates a `@put(...)` expression for Datastar attributes.
+  See `Dstar.post/2` for usage — same API, different HTTP verb.
+  """
+  defdelegate put(module_or_name, name_or_opts \\ []), to: Dstar.Actions
+  defdelegate put(module, event_name, opts), to: Dstar.Actions
+
+  @doc """
+  Generates a `@patch(...)` expression for Datastar attributes.
+  See `Dstar.post/2` for usage — same API, different HTTP verb.
+  """
+  defdelegate patch(module_or_name, name_or_opts \\ []), to: Dstar.Actions
+  defdelegate patch(module, event_name, opts), to: Dstar.Actions
+
+  @doc """
+  Generates a `@delete(...)` expression for Datastar attributes.
+  See `Dstar.post/2` for usage — same API, different HTTP verb.
+  """
+  defdelegate delete(module_or_name, name_or_opts \\ []), to: Dstar.Actions
+  defdelegate delete(module, event_name, opts), to: Dstar.Actions
+
+  @doc deprecated: "Use Dstar.post/2 (or get/put/patch/delete) instead"
   defdelegate event(module_or_name, name_or_opts), to: Dstar.Actions
   defdelegate event(module, event_name, opts), to: Dstar.Actions
 

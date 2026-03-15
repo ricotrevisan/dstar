@@ -88,7 +88,7 @@ end
 <li id={"todo-#{@todo.id}"} class="todo-item">
   <span><%= @todo.text %></span>
   <button data-signals:deleting_id={"'#{@todo.id}'"}
-          data-on:click="@post('/todos/delete')">
+          data-on:click="@delete('/todos/delete')">
     Delete
   </button>
 </li>
@@ -210,10 +210,10 @@ end
   
   <input type="search"
          data-model="query"
-         data-on:input={Dstar.event(SearchHandler, "search")}
+         data-on:input={Dstar.post(SearchHandler, "search")}
          placeholder="Search...">
   
-  <button data-on:click={Dstar.event(SearchHandler, "clear")}>
+  <button data-on:click={Dstar.post(SearchHandler, "clear")}>
     Clear
   </button>
   
@@ -246,7 +246,7 @@ end
 </html>
 ```
 
-`Dstar.event/2,3` automatically includes `_csrf-token` in headers.
+Dstar's verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) automatically include `_csrf-token` in headers.
 
 ### Form-compatible
 

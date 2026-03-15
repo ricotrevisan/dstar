@@ -233,7 +233,7 @@ end
 - No `{:noreply, socket}` tuples — just return the conn
 - No `put_signal/3` — use `Dstar.patch_signals/3`
 - No `render/1` callback — use standard Phoenix templates
-- No `event("name")` — use `@post('/path')` or `Dstar.event(Module, "name")`
+- No `event("name")` — use `@post('/path')` or `Dstar.post(Module, "name")`
 
 ### Stateless views using dynamic dispatch
 
@@ -253,10 +253,10 @@ end
 ```
 
 ```heex
-<%!-- Template uses Dstar.event/2 for dispatch routing --%>
+<%!-- Template uses Dstar.post/2 for dispatch routing --%>
 <div data-signals:count="0">
   Count: <span data-text="$count"></span>
-  <button data-on:click={Dstar.event(MyAppWeb.CounterHandler, "increment")}>+</button>
+  <button data-on:click={Dstar.post(MyAppWeb.CounterHandler, "increment")}>+</button>
 </div>
 ```
 
@@ -408,7 +408,7 @@ post "/game/stream", GameStreamController, :stream
 <button data-on:click="@put('/items/save')">Save</button>
 
 <%!-- After — using dynamic dispatch --%>
-<button data-on:click={Dstar.event(MyAppWeb.CounterHandler, "increment")}>+</button>
+<button data-on:click={Dstar.post(MyAppWeb.CounterHandler, "increment")}>+</button>
 ```
 
 ### Navigation links
@@ -462,7 +462,7 @@ end
 <body data-signals:_csrf-token={"'#{get_csrf_token()}'"}>
 ```
 
-When using `Dstar.event/2,3`, the CSRF header is automatically included in the generated `@post(...)` expression. If you write `@post(...)` manually, add the header yourself:
+When using Dstar's verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`), the CSRF header is automatically included in the generated expressions. If you write `@post(...)` manually, add the header yourself:
 
 ```heex
 <button data-on:click="@post('/counter/increment', {headers: {'x-csrf-token': $_csrfToken}})">
@@ -526,7 +526,7 @@ end
 | `execute_script(socket, js)` | `Dstar.execute_script(conn, js)` | |
 | `redirect(socket, url)` | `Dstar.redirect(conn, url)` | |
 | `console_log(socket, msg)` | `Dstar.console_log(conn, msg)` | |
-| `event("name")` | `Dstar.event(Module, "name")` or `@post('/path')` | |
+| `event("name")` | `Dstar.post(Module, "name")` or `@post('/path')` | All verbs available: `get`, `put`, `patch`, `delete` |
 | `navigate("/path")` | Standard `<a href>` | No soft nav in Dstar |
 | `PhoenixDatastar.Router.datastar/3` | Standard `get`/`post` routes | |
 | `PhoenixDatastar.Router.datastar_session/3` | N/A | No sessions in Dstar |
@@ -638,3 +638,4 @@ Yes. Dstar works with standard Phoenix templates. The only difference is you ren
 ### What replaces the mount template / DefaultHTML?
 
 Nothing. Your standard Phoenix layout (`root.html.heex`, `app.html.heex`) serves this purpose. Initialize signals with `data-signals` attributes directly in your templates.
+`data-signals` attributes directly in your templates.

@@ -48,11 +48,12 @@ All functions in `Dstar` module:
 - **`Dstar.console_log(conn, message, opts \\ [])`** — Browser console output
   - Opts: `:level` (`:log`/`:warn`/`:error`/`:info`/`:debug`)
 
-### Event Helpers
+### HTTP Verb Helpers
 
-- **`Dstar.event(module, event_name)`** — Generates `@post("/ds/:module/:event", {...})` for attributes
-- **`Dstar.event(module, event_name, opts)`** — With options (`:prefix` for URL prefix)
-- **`Dstar.event(event_name, opts)`** — Dynamic module variant (reads `$_dstar_module` signal from client)
+- **`Dstar.post(module, event_name)`** — Generates `@post("/ds/:module/:event", {...})` for attributes
+- **`Dstar.post(module, event_name, opts)`** — With options (`:prefix` for URL prefix)
+- **`Dstar.post(event_name, opts)`** — Dynamic module variant (reads `$_dstar_module` signal from client)
+- All HTTP verbs available: `Dstar.get/2,3`, `Dstar.put/2,3`, `Dstar.patch/2,3`, `Dstar.delete/2,3`
 
 ## CSRF Setup
 
@@ -62,7 +63,7 @@ All functions in `Dstar` module:
 <body data-signals:_csrf-token={"'#{get_csrf_token()}'"}>
 ```
 
-The `_` prefix makes it client-only; sent as `x-csrf-token` header. `Dstar.event/2,3` auto-includes this.
+The `_` prefix makes it client-only; sent as `x-csrf-token` header. Dstar's verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) auto-include this.
 
 **Approach 2: Form-compat** (for mixed SSE + regular form routes)
 
@@ -95,7 +96,7 @@ defmodule MyApp.CounterHandler do
 end
 ```
 
-Client: `data-on:click={Dstar.event(CounterHandler, "increment")}`
+Client: `data-on:click={Dstar.post(CounterHandler, "increment")}`
 
 ## Real-time Streaming Pattern
 
@@ -162,3 +163,7 @@ data-signals:errors="{}"         <%!-- Object --%>
 ## Dependencies
 
 Only two: `{:plug, "~> 1.14"}` and `{:jason, "~> 1.4"}`
+dencies
+
+Only two: `{:plug, "~> 1.14"}` and `{:jason, "~> 1.4"}`
+"~> 1.14"}` and `{:jason, "~> 1.4"}`
