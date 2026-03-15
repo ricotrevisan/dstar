@@ -13,7 +13,7 @@ No processes. No supervision trees. No GenServers. No behaviours. No macros. Jus
 
 It works with any Plug-based application: Phoenix (controller-based or LiveView-adjacent), plain Plug, Bandit. If you have a `%Plug.Conn{}`, you can use Dstar.
 
-Think of it as the complement to "deadview" Phoenix — the controller-based approach where you own the request/response cycle. If [PhoenixDatastar](https://github.com/elixir-datastar/phoenix_datastar) gives you a LiveView-like experience with processes and channels, Dstar gives you the **raw primitives** for people who want to build their own abstractions or stay close to the metal.
+Think of it as the complement to "deadview" Phoenix — the controller-based approach where you own the request/response cycle. 
 
 ## Installation
 
