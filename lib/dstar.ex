@@ -39,6 +39,22 @@ defmodule Dstar do
   defdelegate start(conn), to: Dstar.SSE
 
   @doc """
+  Checks if an SSE connection is still open.
+
+  Returns `{:ok, conn}` if open, `{:error, conn}` if closed.
+  Useful in streaming loops to detect disconnections.
+
+  ## Example
+
+      case Dstar.check_connection(conn) do
+        {:ok, conn} -> stream_loop(conn)
+        {:error, _} -> :ok
+      end
+
+  """
+  defdelegate check_connection(conn), to: Dstar.SSE
+
+  @doc """
   Reads Datastar signals from the request.
 
   For GET requests, reads from query params. For POST/PUT/etc, reads from the JSON body.
@@ -61,6 +77,21 @@ defmodule Dstar do
   """
   def patch_signals(conn, signals, opts \\ []) do
     Dstar.Signals.patch(conn, signals, opts)
+  end
+
+  @doc """
+  Removes signals from the client by setting them to nil.
+
+  Accepts a single path string or list of dot-notated paths.
+
+  ## Examples
+
+      conn |> Dstar.remove_signals("user.profile.theme")
+      conn |> Dstar.remove_signals(["user.name", "user.email"])
+
+  """
+  def remove_signals(conn, paths, opts \\ []) do
+    Dstar.Signals.remove_signals(conn, paths, opts)
   end
 
   @doc """

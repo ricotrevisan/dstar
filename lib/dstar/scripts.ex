@@ -80,7 +80,7 @@ defmodule Dstar.Scripts do
   def redirect(conn, url, opts \\ []) when is_binary(url) do
     execute(
       conn,
-      "setTimeout(function(){window.location='#{escape_js_string(url)}'},0)",
+      "setTimeout(function(){window.location.href=#{Jason.encode!(url)}},0)",
       opts
     )
   end

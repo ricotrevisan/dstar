@@ -179,6 +179,23 @@ Opens an SSE connection. Sets `text/event-stream` content type, disables caching
 conn = Dstar.start(conn)
 ```
 
+### `Dstar.check_connection(conn)` → `{:ok, Plug.Conn.t()} | {:error, Plug.Conn.t()}`
+
+Checks if an SSE connection is still open by sending an SSE comment line. Returns `{:ok, conn}` if the connection is active, `{:error, conn}` if closed or not yet started. Useful for detecting disconnections in streaming loops.
+
+```elixir
+case Dstar.check_connection(conn) do
+  {:ok, conn} ->
+    conn = Dstar.patch_signals(conn, %{data: new_data})
+    loop(conn)
+  
+  {:error, _conn} ->
+    # Client disconnected, clean up
+    Phoenix.PubSub.unsubscribe(MyApp.PubSub, "topic")
+    :ok
+end
+```
+
 ### `Dstar.read_signals(conn)` → `map()`
 
 Reads Datastar signals from the request. For `GET` requests, reads from the `datastar` query parameter. For everything else, reads from the JSON body.
@@ -203,6 +220,30 @@ conn
 - `:event_id` — Event ID for client tracking
 - `:retry` — Retry duration in milliseconds
 
+### `Dstar.remove_signals(conn, paths, opts \\ [])` → `Plug.Conn.t()`
+
+Removes signals from the client by setting them to `nil`. Accepts a single dot-notated path string or a list of paths. Paths with shared prefixes are deep-merged correctly.
+
+```elixir
+# Remove single signal
+conn |> Dstar.remove_signals("user.profile.theme")
+
+# Remove multiple signals
+conn |> Dstar.remove_signals([
+  "user.name",
+  "user.email",
+  "user.profile.avatar"
+])
+
+# Common use case: logout
+conn
+|> Dstar.start()
+|> Dstar.remove_signals(["user", "session", "preferences"])
+|> Dstar.redirect("/login")
+```
+
+Validates paths and raises on empty strings, leading/trailing/consecutive dots.
+
 ### `Dstar.patch_elements(conn, html, opts)` → `Plug.Conn.t()`
 
 Sends a `datastar-patch-elements` event. Patches DOM elements on the client.
@@ -211,11 +252,20 @@ Sends a `datastar-patch-elements` event. Patches DOM elements on the client.
 conn
 |> Dstar.patch_elements(~s(<span id="count">42</span>), selector: "#count")
 |> Dstar.patch_elements("<li>new item</li>", selector: "ul#items", mode: :append)
+
+# SVG chart update
+svg = "<svg>...</svg>"
+conn |> Dstar.patch_elements(svg, selector: "#chart", namespace: :svg)
+
+# MathML formula
+mathml = "<math>...</math>"
+conn |> Dstar.patch_elements(mathml, selector: "#formula", namespace: :mathml)
 ```
 
 **Options:**
 - `:selector` — CSS selector (required)
 - `:mode` — `:outer` (default), `:inner`, `:append`, `:prepend`, `:before`, `:after`, `:replace`, `:remove`
+- `:namespace` — `:html` (default), `:svg`, `:mathml`
 - `:use_view_transitions` — Enable View Transitions API (default: `false`)
 - `:event_id` — Event ID for client tracking
 - `:retry` — Retry duration in milliseconds
@@ -292,8 +342,17 @@ defmodule MyAppWeb.TickerController do
   defp loop(conn) do
     receive do
       {:tick, count} ->
-        conn = Dstar.patch_signals(conn, %{tick: count})
-        loop(conn)
+        # Optional: check connection health
+        case Dstar.check_connection(conn) do
+          {:ok, conn} ->
+            conn = Dstar.patch_signals(conn, %{tick: count})
+            loop(conn)
+          
+          {:error, _conn} ->
+            # Client disconnected, clean up
+            Phoenix.PubSub.unsubscribe(MyApp.PubSub, "ticker")
+            :ok
+        end
     end
   end
 end

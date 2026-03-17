@@ -2,15 +2,40 @@
 
 ## Unreleased
 
+### Added
+
+- **`Dstar.SSE.check_connection/1`** — Checks if an SSE connection is still
+  open by sending an SSE comment line. Returns `{:ok, conn}` if the connection
+  is active, `{:error, conn}` if closed or not yet started. Useful for
+  detecting disconnections in streaming loops. Also available via
+  `Dstar.check_connection/1`.
+
+- **`Dstar.Signals.remove_signals/3`** — Removes signals from the client by
+  setting them to `nil`. Accepts a single dot-notated path string (e.g.
+  `"user.profile.theme"`) or a list of paths (e.g. `["user.name",
+  "user.email"]`). Paths with shared prefixes are deep-merged correctly:
+  `["user.a", "user.b"]` becomes `%{"user" => %{"a" => nil, "b" => nil}}`.
+  Validates paths and raises on empty strings, leading/trailing/consecutive
+  dots. Also available via `Dstar.remove_signals/3` and
+  `Dstar.Signals.format_remove/2` for string formatting.
+
+- **`:namespace` option for `Dstar.Elements.patch/3` and
+  `Dstar.Elements.format_patch/2`** — Specify element namespace: `:html`
+  (default), `:svg`, or `:mathml`. When set to `:svg` or `:mathml`, emits a
+  `namespace` data line in the SSE event. Default `:html` omits the line
+  (backward compatible).
+
 ### Changed
 
 - **`Dstar.Elements.patch/3` and `Dstar.Elements.format_patch/2` now accept
-  `Phoenix.HTML.safe()` tuples** in addition to plain binary strings. This
-  means you can pass the output of HEEx templates and `Phoenix.HTML` helpers
-  directly (e.g. `{:safe, iodata}`) without manually converting to a string
-  first. A private `to_html_string/1` helper handles binaries, `{:safe, iodata}`
-  tuples, and any value implementing the `Phoenix.HTML.Safe` protocol (when
-  the protocol is available).
+  `Phoenix.HTML.safe()` tuples** in addition to plain binary strings. Pass
+  HEEx template output and `Phoenix.HTML` helpers directly without manual
+  conversion.
+
+- **`Dstar.Scripts.redirect/3` now uses `Jason.encode!/1`** for URL encoding
+  instead of manual JavaScript string escaping. Prevents injection via special
+  characters, `</script>` sequences, and Unicode. Generated JS changed from
+  `window.location='url'` to `window.location.href="url"`.
 
 ## 0.0.4 — 2026-03-15
 

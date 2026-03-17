@@ -18,6 +18,7 @@ defmodule Dstar.Elements do
 
   # Valid patch modes
   @valid_modes ~w(outer inner remove replace prepend append before after)a
+  @valid_namespaces ~w(html svg mathml)a
 
   @doc """
   Patches DOM elements with new HTML content.
@@ -26,6 +27,7 @@ defmodule Dstar.Elements do
 
   - `:selector` - CSS selector for target elements (required)
   - `:mode` - Patch mode (default: :outer)
+  - `:namespace` - Element namespace: `:html`, `:svg`, `:mathml` (default: :html)
   - `:use_view_transitions` - Enable View Transitions API (default: false)
   - `:event_id` - Event ID for client tracking
   - `:retry` - Retry duration in milliseconds
@@ -41,6 +43,9 @@ defmodule Dstar.Elements do
       # Append to element
       conn |> patch("<li>Item</li>", selector: "ul", mode: :append)
 
+      # SVG namespace
+      conn |> patch("<circle cx='50' cy='50' r='40'/>", selector: "#svg", namespace: :svg)
+
       # With view transitions
       conn |> patch("<div>Smooth</div>", selector: "#box", use_view_transitions: true)
 
@@ -50,16 +55,23 @@ defmodule Dstar.Elements do
     html = to_html_string(html)
     selector = Keyword.fetch!(opts, :selector)
     mode = Keyword.get(opts, :mode, @default_patch_mode)
+    namespace = Keyword.get(opts, :namespace, :html)
     use_view_transitions = Keyword.get(opts, :use_view_transitions, @default_use_view_transitions)
 
     unless mode in @valid_modes do
       raise ArgumentError, "Invalid patch mode: #{inspect(mode)}"
     end
 
+    unless namespace in @valid_namespaces do
+      raise ArgumentError,
+            "Invalid namespace: #{inspect(namespace)}. Must be one of #{inspect(@valid_namespaces)}"
+    end
+
     data_lines =
       []
       |> add_selector(selector)
       |> add_mode(mode)
+      |> maybe_add_namespace(namespace)
       |> maybe_add_view_transitions(use_view_transitions)
       |> add_elements(html)
 
@@ -108,6 +120,7 @@ defmodule Dstar.Elements do
   ## Example
 
       format_patch("<div>content</div>", selector: "#target", mode: :outer)
+      format_patch("<circle r='10'/>", selector: "#svg", namespace: :svg)
 
   """
   @spec format_patch(String.t() | Phoenix.HTML.safe(), keyword()) :: String.t()
@@ -115,12 +128,19 @@ defmodule Dstar.Elements do
     html = to_html_string(html)
     selector = Keyword.fetch!(opts, :selector)
     mode = Keyword.get(opts, :mode, @default_patch_mode)
+    namespace = Keyword.get(opts, :namespace, :html)
     use_view_transitions = Keyword.get(opts, :use_view_transitions, @default_use_view_transitions)
+
+    unless namespace in @valid_namespaces do
+      raise ArgumentError,
+            "Invalid namespace: #{inspect(namespace)}. Must be one of #{inspect(@valid_namespaces)}"
+    end
 
     data_lines =
       []
       |> add_selector(selector)
       |> add_mode(mode)
+      |> maybe_add_namespace(namespace)
       |> maybe_add_view_transitions(use_view_transitions)
       |> add_elements(html)
 
@@ -135,6 +155,12 @@ defmodule Dstar.Elements do
 
   defp add_mode(lines, mode) do
     lines ++ ["mode " <> to_string(mode)]
+  end
+
+  defp maybe_add_namespace(lines, :html), do: lines
+
+  defp maybe_add_namespace(lines, namespace) do
+    lines ++ ["namespace " <> to_string(namespace)]
   end
 
   defp maybe_add_view_transitions(lines, false), do: lines

@@ -27,6 +27,7 @@ All functions in `Dstar` module:
 ### Connection
 
 - **`Dstar.start(conn)`** — Opens SSE connection (chunked, text/event-stream)
+- **`Dstar.check_connection(conn)`** — Tests if SSE connection is still open. Returns `{:ok, conn}` if active, `{:error, conn}` if closed. Useful for detecting disconnections in streaming loops
 
 ### Signals
 
@@ -166,4 +167,6 @@ Only two: `{:plug, "~> 1.14"}` and `{:jason, "~> 1.4"}`
 dencies
 
 Only two: `{:plug, "~> 1.14"}` and `{:jason, "~> 1.4"}`
+"~> 1.14"}` and `{:jason, "~> 1.4"}`
+y two: `{:plug, "~> 1.14"}` and `{:jason, "~> 1.4"}`
 "~> 1.14"}` and `{:jason, "~> 1.4"}`

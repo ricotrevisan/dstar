@@ -33,6 +33,41 @@ defmodule Dstar.SSE do
   end
 
   @doc """
+  Checks if an SSE connection is still open by sending a comment line.
+
+  SSE comments (lines starting with `:`) are ignored by clients but
+  will fail if the connection has been closed. Useful for detecting
+  disconnections in streaming loops.
+
+  Returns `{:ok, conn}` if the connection is open, `{:error, conn}` if closed
+  or not yet started.
+
+  ## Example
+
+      case Dstar.SSE.check_connection(conn) do
+        {:ok, conn} ->
+          # Continue streaming
+          stream_loop(conn)
+
+        {:error, _conn} ->
+          # Connection closed, clean up
+          :ok
+      end
+
+  """
+  @spec check_connection(Plug.Conn.t()) :: {:ok, Plug.Conn.t()} | {:error, Plug.Conn.t()}
+  def check_connection(conn) do
+    try do
+      case Plug.Conn.chunk(conn, ": \n\n") do
+        {:ok, conn} -> {:ok, conn}
+        {:error, _reason} -> {:error, conn}
+      end
+    rescue
+      ArgumentError -> {:error, conn}
+    end
+  end
+
+  @doc """
   Sends an SSE event to the client.
 
   Returns `{:ok, conn}` on success, `{:error, reason}` on failure.

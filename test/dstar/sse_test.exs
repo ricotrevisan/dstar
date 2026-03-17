@@ -1,5 +1,6 @@
 defmodule Dstar.SSETest do
   use ExUnit.Case, async: true
+  import Plug.Test
 
   alias Dstar.SSE
 
@@ -19,6 +20,22 @@ defmodule Dstar.SSETest do
     test "formats empty data lines" do
       result = SSE.format_event("my-event", [])
       assert result == "event: my-event\n\n\n"
+    end
+  end
+
+  describe "check_connection/1" do
+    test "returns {:ok, conn} for a valid chunked connection" do
+      conn =
+        conn(:post, "/test")
+        |> SSE.start()
+
+      assert {:ok, %Plug.Conn{state: :chunked}} = SSE.check_connection(conn)
+    end
+
+    test "returns {:error, conn} for a non-chunked connection" do
+      conn = conn(:post, "/test")
+
+      assert {:error, %Plug.Conn{}} = SSE.check_connection(conn)
     end
   end
 end

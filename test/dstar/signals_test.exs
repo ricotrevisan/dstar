@@ -1,7 +1,14 @@
 defmodule Dstar.SignalsTest do
   use ExUnit.Case, async: true
+  import Plug.Test
 
-  alias Dstar.Signals
+  alias Dstar.{Signals, SSE}
+
+  # Helper to create a chunked SSE conn
+  defp chunked_conn do
+    conn(:post, "/test")
+    |> SSE.start()
+  end
 
   describe "read/1" do
     test "reads signals from GET query params" do
@@ -45,6 +52,103 @@ defmodule Dstar.SignalsTest do
       result = Signals.format_patch(%{count: 0}, only_if_missing: true)
       assert result =~ "onlyIfMissing true"
       assert result =~ "signals {\"count\":0}"
+    end
+  end
+
+  describe "remove_signals/3" do
+    test "removes a single top-level signal" do
+      conn = chunked_conn()
+      result = Signals.remove_signals(conn, "count")
+
+      assert result.state == :chunked
+    end
+
+    test "removes a nested signal with dot notation" do
+      conn = chunked_conn()
+      result = Signals.remove_signals(conn, "user.profile.theme")
+
+      assert result.state == :chunked
+    end
+
+    test "removes multiple signals with shared prefix" do
+      conn = chunked_conn()
+      result = Signals.remove_signals(conn, ["user.name", "user.email"])
+
+      assert result.state == :chunked
+    end
+
+    test "passes through options" do
+      conn = chunked_conn()
+      result = Signals.remove_signals(conn, "count", event_id: "remove-1")
+
+      assert result.state == :chunked
+    end
+
+    test "raises on empty path" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, "Signal path cannot be empty", fn ->
+        Signals.remove_signals(conn, "")
+      end
+    end
+
+    test "raises on path with leading dot" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, ~r/cannot start with a dot/, fn ->
+        Signals.remove_signals(conn, ".user")
+      end
+    end
+
+    test "raises on path with trailing dot" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, ~r/cannot end with a dot/, fn ->
+        Signals.remove_signals(conn, "user.")
+      end
+    end
+
+    test "raises on path with consecutive dots" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, ~r/cannot contain consecutive dots/, fn ->
+        Signals.remove_signals(conn, "user..profile")
+      end
+    end
+  end
+
+  describe "format_remove/2" do
+    test "formats removal of a single signal" do
+      result = Signals.format_remove("count")
+
+      assert result =~ "\"count\":null"
+    end
+
+    test "formats removal of nested signal" do
+      result = Signals.format_remove("user.profile")
+
+      assert result =~ "\"user\""
+      assert result =~ "\"profile\":null"
+    end
+
+    test "formats removal of multiple signals with shared prefix" do
+      result = Signals.format_remove(["user.name", "user.email"])
+
+      assert result =~ "\"name\":null"
+      assert result =~ "\"email\":null"
+    end
+
+    test "formats with only_if_missing option" do
+      result = Signals.format_remove("count", only_if_missing: true)
+
+      assert result =~ "onlyIfMissing true"
+      assert result =~ "\"count\":null"
+    end
+
+    test "raises on invalid path" do
+      assert_raise ArgumentError, "Signal path cannot be empty", fn ->
+        Signals.format_remove("")
+      end
     end
   end
 end

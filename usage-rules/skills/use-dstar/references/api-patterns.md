@@ -353,3 +353,235 @@ end
   </button>
 </div>
 ```
+
+## Streaming with Disconnect Detection
+
+**Controller:**
+```elixir
+defmodule MyAppWeb.MetricsController do
+  use MyAppWeb, :controller
+  
+  def live_metrics(conn, _params) do
+    Phoenix.PubSub.subscribe(MyApp.PubSub, "metrics:live")
+    
+    conn = Dstar.start(conn)
+    stream_loop(conn)
+  end
+  
+  defp stream_loop(conn) do
+    receive do
+      {:metric_update, metrics} ->
+        # Check connection before sending
+        case Dstar.check_connection(conn) do
+          {:ok, conn} ->
+            conn = Dstar.patch_signals(conn, %{
+              cpu: metrics.cpu,
+              memory: metrics.memory,
+              requests: metrics.requests
+            })
+            stream_loop(conn)
+          
+          {:error, _conn} ->
+            # Client disconnected, clean up and exit
+            Phoenix.PubSub.unsubscribe(MyApp.PubSub, "metrics:live")
+            :ok
+        end
+    after
+      30_000 ->
+        # Periodic health check (optional)
+        case Dstar.check_connection(conn) do
+          {:ok, conn} ->
+            stream_loop(conn)
+          
+          {:error, _conn} ->
+            Phoenix.PubSub.unsubscribe(MyApp.PubSub, "metrics:live")
+            :ok
+        end
+    end
+  end
+end
+```
+
+**Template:**
+```heex
+<div data-init="@post('/metrics/live', {retryMaxCount: Infinity})"
+     data-on:online__window="@post('/metrics/live', {retryMaxCount: Infinity})"
+     data-signals:cpu="0"
+     data-signals:memory="0"
+     data-signals:requests="0">
+  
+  <div class="metric">
+    CPU: <span data-text="`${$cpu}%`"></span>
+  </div>
+  <div class="metric">
+    Memory: <span data-text="`${$memory}MB`"></span>
+  </div>
+  <div class="metric">
+    Requests/sec: <span data-text="$requests"></span>
+  </div>
+</div>
+```
+
+## Signal Removal
+
+**Controller:**
+```elixir
+defmodule MyAppWeb.AuthController do
+  use MyAppWeb, :controller
+  
+  def logout(conn, _params) do
+    # Clear session server-side
+    conn = clear_session(conn)
+    
+    # Clear all user-related signals on client
+    conn
+    |> Dstar.start()
+    |> Dstar.remove_signals([
+      "user.id",
+      "user.email",
+      "user.name",
+      "user.profile.avatar",
+      "user.profile.theme",
+      "user.preferences"
+    ])
+    |> Dstar.redirect("/login")
+  end
+  
+  def delete_profile_section(conn, _params) do
+    signals = Dstar.read_signals(conn)
+    section = signals["deleting_section"]
+    
+    # Delete from database
+    {:ok, _} = Users.delete_profile_section(
+      conn.assigns.current_user,
+      section
+    )
+    
+    # Remove nested signal path
+    conn
+    |> Dstar.start()
+    |> Dstar.remove_signals("user.profile.#{section}")
+    |> Dstar.console_log("Profile section '#{section}' deleted")
+  end
+end
+```
+
+**Template:**
+```heex
+<div data-signals:user="{id: 123, email: 'user@example.com', profile: {avatar: '/img/avatar.jpg', theme: 'dark'}}">
+  <div class="user-info">
+    <img data-attr:src="$user.profile.avatar">
+    <span data-text="$user.email"></span>
+  </div>
+  
+  <button data-on:click="@post('/auth/logout')">
+    Logout
+  </button>
+  
+  <button data-signals:deleting_section="'avatar'"
+          data-on:click={Dstar.post(AuthController, "delete_profile_section")}>
+    Remove Avatar
+  </button>
+</div>
+```
+
+## SVG / MathML Patching
+
+**Controller:**
+```elixir
+defmodule MyAppWeb.ChartController do
+  use MyAppWeb, :controller
+  
+  def update_chart(conn, _params) do
+    signals = Dstar.read_signals(conn)
+    dataset = signals["selected_dataset"] || "sales"
+    
+    # Fetch data
+    data = Analytics.get_chart_data(dataset)
+    
+    # Render SVG chart
+    svg = render_svg_chart(data)
+    
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_elements(
+      svg,
+      selector: "#chart-container",
+      mode: :inner,
+      namespace: :svg
+    )
+    |> Dstar.patch_signals(%{last_updated: DateTime.utc_now()})
+  end
+  
+  def update_formula(conn, _params) do
+    signals = Dstar.read_signals(conn)
+    formula_id = signals["formula_id"]
+    
+    # Generate MathML
+    mathml = """
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <mrow>
+        <msup>
+          <mi>x</mi>
+          <mn>2</mn>
+        </msup>
+        <mo>+</mo>
+        <msup>
+          <mi>y</mi>
+          <mn>2</mn>
+        </msup>
+        <mo>=</mo>
+        <msup>
+          <mi>z</mi>
+          <mn>2</mn>
+        </msup>
+      </mrow>
+    </math>
+    """
+    
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_elements(
+      mathml,
+      selector: "#formula-#{formula_id}",
+      namespace: :mathml
+    )
+  end
+  
+  defp render_svg_chart(data) do
+    """
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect x="50" y="#{250 - data.value * 2}" width="40" height="#{data.value * 2}" fill="#4CAF50"/>
+      <text x="70" y="280" text-anchor="middle">#{data.label}</text>
+    </svg>
+    """
+  end
+end
+```
+
+**Template:**
+```heex
+<div data-signals:selected_dataset="'sales'"
+     data-signals:last_updated="null">
+  
+  <select data-model="selected_dataset"
+          data-on:change={Dstar.post(ChartController, "update_chart")}>
+    <option value="sales">Sales</option>
+    <option value="revenue">Revenue</option>
+    <option value="users">Users</option>
+  </select>
+  
+  <div id="chart-container">
+    <!-- SVG chart injected here -->
+  </div>
+  
+  <div id="formula-1">
+    <!-- MathML formula injected here -->
+  </div>
+  
+  <button data-signals:formula_id="'1'"
+          data-on:click={Dstar.post(ChartController, "update_formula")}>
+    Show Formula
+  </button>
+</div>
+```

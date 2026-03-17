@@ -53,5 +53,47 @@ defmodule Dstar.ElementsTest do
       result = Elements.format_patch("<div>test</div>", selector: "#x")
       assert result =~ "mode outer"
     end
+
+    test "formats with svg namespace" do
+      result =
+        Elements.format_patch("<circle cx='50' cy='50' r='40'/>",
+          selector: "#svg",
+          namespace: :svg
+        )
+
+      assert result =~ "namespace svg"
+    end
+
+    test "formats with mathml namespace" do
+      result =
+        Elements.format_patch("<math><mi>x</mi></math>",
+          selector: "#math",
+          namespace: :mathml
+        )
+
+      assert result =~ "namespace mathml"
+    end
+
+    test "does not emit namespace line for default html namespace" do
+      result =
+        Elements.format_patch("<div>test</div>",
+          selector: "#x",
+          namespace: :html
+        )
+
+      refute result =~ "namespace"
+    end
+
+    test "does not emit namespace line when namespace not specified" do
+      result = Elements.format_patch("<div>test</div>", selector: "#x")
+
+      refute result =~ "namespace"
+    end
+
+    test "raises on invalid namespace" do
+      assert_raise ArgumentError, ~r/Invalid namespace/, fn ->
+        Elements.format_patch("<element/>", selector: "#x", namespace: :xml)
+      end
+    end
   end
 end
