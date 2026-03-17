@@ -45,8 +45,9 @@ defmodule Dstar.Elements do
       conn |> patch("<div>Smooth</div>", selector: "#box", use_view_transitions: true)
 
   """
-  @spec patch(Plug.Conn.t(), String.t(), keyword()) :: Plug.Conn.t()
-  def patch(conn, html, opts \\ []) when is_binary(html) do
+  @spec patch(Plug.Conn.t(), String.t() | Phoenix.HTML.safe(), keyword()) :: Plug.Conn.t()
+  def patch(conn, html, opts \\ []) do
+    html = to_html_string(html)
     selector = Keyword.fetch!(opts, :selector)
     mode = Keyword.get(opts, :mode, @default_patch_mode)
     use_view_transitions = Keyword.get(opts, :use_view_transitions, @default_use_view_transitions)
@@ -109,8 +110,9 @@ defmodule Dstar.Elements do
       format_patch("<div>content</div>", selector: "#target", mode: :outer)
 
   """
-  @spec format_patch(String.t(), keyword()) :: String.t()
-  def format_patch(html, opts \\ []) when is_binary(html) do
+  @spec format_patch(String.t() | Phoenix.HTML.safe(), keyword()) :: String.t()
+  def format_patch(html, opts \\ []) do
+    html = to_html_string(html)
     selector = Keyword.fetch!(opts, :selector)
     mode = Keyword.get(opts, :mode, @default_patch_mode)
     use_view_transitions = Keyword.get(opts, :use_view_transitions, @default_use_view_transitions)
@@ -139,6 +141,21 @@ defmodule Dstar.Elements do
 
   defp maybe_add_view_transitions(lines, true) do
     lines ++ ["useViewTransition true"]
+  end
+
+  defp to_html_string(html) when is_binary(html), do: html
+
+  defp to_html_string({:safe, iodata}), do: IO.iodata_to_binary(iodata)
+
+  defp to_html_string(other) do
+    if Code.ensure_loaded?(Phoenix.HTML.Safe) do
+      other
+      |> then(&apply(Phoenix.HTML.Safe, :to_iodata, [&1]))
+      |> IO.iodata_to_binary()
+    else
+      raise ArgumentError,
+            "expected a binary string or {:safe, iodata} tuple, got: #{inspect(other)}"
+    end
   end
 
   defp add_elements(lines, html) do

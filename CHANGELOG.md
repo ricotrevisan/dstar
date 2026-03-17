@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`Dstar.Elements.patch/3` and `Dstar.Elements.format_patch/2` now accept
+  `Phoenix.HTML.safe()` tuples** in addition to plain binary strings. This
+  means you can pass the output of HEEx templates and `Phoenix.HTML` helpers
+  directly (e.g. `{:safe, iodata}`) without manually converting to a string
+  first. A private `to_html_string/1` helper handles binaries, `{:safe, iodata}`
+  tuples, and any value implementing the `Phoenix.HTML.Safe` protocol (when
+  the protocol is available).
+
 ## 0.0.4 — 2026-03-15
 
 ### Added
