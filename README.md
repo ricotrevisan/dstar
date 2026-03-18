@@ -22,7 +22,7 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "~> 0.0.4"}
+    {:dstar, "~> 0.0.5"}
   ]
 end
 ```
@@ -246,7 +246,7 @@ Validates paths and raises on empty strings, leading/trailing/consecutive dots.
 
 ### `Dstar.patch_elements(conn, html, opts)` → `Plug.Conn.t()`
 
-Sends a `datastar-patch-elements` event. Patches DOM elements on the client.
+Sends a `datastar-patch-elements` event. Patches DOM elements on the client. Accepts both binary strings and `Phoenix.HTML.safe()` tuples (e.g., HEEx template output).
 
 ```elixir
 conn
@@ -444,10 +444,10 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 
 | Module | Functions |
 |--------|-----------|
-| `Dstar.SSE` | `start/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2` |
-| `Dstar.Signals` | `read/1`, `patch/2,3`, `patch_raw/2,3`, `format_patch/1,2` |
+| `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2` |
+| `Dstar.Signals` | `read/1`, `patch/2,3`, `patch_raw/2,3`, `format_patch/1,2`, `remove_signals/2,3`, `format_remove/1,2` |
 | `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `format_patch/1,2` |
-| `Dstar.Actions` | `event/1,2,3`, `encode_module/1`, `decode_module/1` |
+| `Dstar.Actions` | `post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`, `encode_module/1`, `decode_module/1` |
 | `Dstar.Scripts` | `execute/2,3`, `redirect/2,3`, `console_log/2,3` |
 | `Dstar.Plugs.Dispatch` | Standard Plug for dynamic event routing |
 | `Dstar.Plugs.RenameCsrfParam` | Standard Plug for CSRF param compatibility |

@@ -59,7 +59,9 @@ defmodule Dstar.ActionsTest do
     describe "#{verb}/1 dynamic" do
       test "generates a #{verb_str} action with dynamic module signal and CSRF header" do
         result = apply(Actions, unquote(verb), ["increment"])
-        assert result == "@#{unquote(verb_str)}('/ds/' + $_dstar_module + '/increment', #{@csrf_opts})"
+
+        assert result ==
+                 "@#{unquote(verb_str)}('/ds/' + $_dstar_module + '/increment', #{@csrf_opts})"
       end
 
       test "generates #{verb_str} with custom module signal and CSRF header" do

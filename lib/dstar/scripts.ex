@@ -68,7 +68,8 @@ defmodule Dstar.Scripts do
   @doc """
   Redirects the client to the given URL via JavaScript.
 
-  Uses `setTimeout` for proper browser history handling.
+  Uses `Jason.encode!/1` to safely encode the URL, preventing injection
+  attacks. Uses `setTimeout` for proper browser history handling.
 
   ## Examples
 

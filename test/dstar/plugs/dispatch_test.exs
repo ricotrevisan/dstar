@@ -102,7 +102,10 @@ defmodule Dstar.Plugs.DispatchTest do
       module_name = Dstar.Actions.encode_module(TestCounterHandler)
 
       conn =
-        conn(:get, "/ds/#{module_name}/increment?datastar=" <> URI.encode_www_form(~s({"count":10})))
+        conn(
+          :get,
+          "/ds/#{module_name}/increment?datastar=" <> URI.encode_www_form(~s({"count":10}))
+        )
         |> Map.put(:path_params, %{"module" => module_name, "event" => "increment"})
 
       result = Dispatch.call(conn, opts)
@@ -191,7 +194,10 @@ defmodule Dstar.Plugs.DispatchTest do
       module_name = Dstar.Actions.encode_module(TestCounterHandler)
 
       conn =
-        conn(:get, "/ds/#{module_name}/increment?datastar=" <> URI.encode_www_form(~s({"count":7})))
+        conn(
+          :get,
+          "/ds/#{module_name}/increment?datastar=" <> URI.encode_www_form(~s({"count":7}))
+        )
         |> Map.put(:path_params, %{"module" => module_name, "event" => "increment"})
 
       result = Dispatch.call(conn, opts)

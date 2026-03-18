@@ -5,6 +5,7 @@ defmodule Dstar.Signals do
       signals = Dstar.Signals.read(conn)
       conn |> patch(%{count: 42, message: "Hello"})
       conn |> patch(%{count: 42}, only_if_missing: true)
+      conn |> remove_signals("user.session")
   """
 
   alias Dstar.SSE
@@ -161,12 +162,13 @@ defmodule Dstar.Signals do
   @doc """
   Formats a signal removal as an SSE event string (for stateless responses).
 
-  ## Example
+  ## Examples
 
       format_remove("user.profile")
       # => "event: datastar-patch-signals\\ndata: signals {\\"user\\":{\\"profile\\":null}}\\n\\n"
 
       format_remove(["user.a", "user.b"])
+      # => "event: datastar-patch-signals\\ndata: signals {\\"user\\":{\\"a\\":null,\\"b\\":null}}\\n\\n"
 
   """
   @spec format_remove(String.t() | [String.t()], keyword()) :: String.t()

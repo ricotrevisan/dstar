@@ -1,7 +1,7 @@
 defmodule Dstar.MixProject do
   use Mix.Project
 
-  @version "0.0.4"
+  @version "0.0.5"
   @source_url "https://github.com/ricotrevisan/dstar"
 
   def project do
@@ -36,7 +36,8 @@ defmodule Dstar.MixProject do
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
       maintainers: ["Rico Trevisan"],
-      files: ~w(lib docs usage-rules.md usage-rules .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
+      files:
+        ~w(lib docs usage-rules.md usage-rules .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 

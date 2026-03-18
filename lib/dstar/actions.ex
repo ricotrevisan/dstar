@@ -31,6 +31,7 @@ defmodule Dstar.Actions do
 
   for verb <- @verbs do
     verb_str = Atom.to_string(verb)
+
     @doc """
     Generates a `@#{verb_str}(...)` action expression for Datastar attributes.
 
