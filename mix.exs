@@ -43,7 +43,7 @@ defmodule Dstar.MixProject do
 
   defp docs do
     [
-      main: "Dstar",
+      main: "readme",
       source_url: @source_url,
       source_ref: "v#{@version}",
       extras: ["README.md", "CHANGELOG.md", "docs/migrating-from-phoenix-datastar.md"],
