@@ -179,6 +179,14 @@ Opens an SSE connection. Sets `text/event-stream` content type, disables caching
 conn = Dstar.start(conn)
 ```
 
+### `Dstar.start_stream(conn, scope_key)` → `Plug.Conn.t()`
+
+Like `start/1`, but with per-tab stream deduplication. Kills any previous stream process for the same user+tab before opening a new one. Requires setup — see [Stream Deduplication](#stream-deduplication-optional).
+
+```elixir
+conn = Dstar.start_stream(conn, current_user.id)
+```
+
 ### `Dstar.check_connection(conn)` → `{:ok, Plug.Conn.t()} | {:error, Plug.Conn.t()}`
 
 Checks if an SSE connection is still open by sending an SSE comment line. Returns `{:ok, conn}` if the connection is active, `{:error, conn}` if closed or not yet started. Useful for detecting disconnections in streaming loops.
@@ -378,6 +386,68 @@ network returns.
 
 The library provides the SSE plumbing. Your app provides the PubSub topic and the business logic.
 
+## Stream Deduplication (Optional)
+
+With full-page navigation, SSE stream processes don't learn the client
+disconnected until they try to write — which only happens on the next
+PubSub broadcast or keepalive tick. In the meantime, zombie processes
+hold subscriptions, run wasted DB queries on every broadcast, and on
+HTTP/1.1 can exhaust the browser's 6-connection-per-origin limit.
+
+`Dstar.Utility.StreamRegistry` fixes this. It tracks one stream process
+per user+tab. When a new stream opens from the same tab, the previous
+one is killed instantly — zero-delay cleanup, no wasted work.
+
+This is the **one process** in Dstar. It's opt-in: if you don't need it,
+the library stays zero-process. If you do, you add one child to your
+existing supervision tree.
+
+### 1. Add to your supervision tree
+
+```elixir
+# lib/my_app/application.ex
+children = [
+  Dstar.Utility.StreamRegistry,
+  # ...
+]
+```
+
+### 2. Add a `tabId` signal to your root layout
+
+```heex
+<body data-signals:tabId="sessionStorage.getItem('_ds_tab') || (() => { const id = crypto.randomUUID(); sessionStorage.setItem('_ds_tab', id); return id; })()">
+```
+
+`sessionStorage` is per-tab — each tab gets its own UUID that persists
+across navigations but is unique per tab. Multiple tabs work independently.
+
+> **Why not `_tabId`?** Datastar treats `_`-prefixed signals as client-only
+> and never sends them to the server. The signal needs to reach the backend,
+> so it must not have a `_` prefix.
+
+### 3. Replace `Dstar.start(conn)` in stream controllers
+
+```diff
+- conn = Dstar.start(conn)
++ conn = Dstar.start_stream(conn, scope.user.id)
+```
+
+The second argument is any term that identifies the user or session
+(e.g., `user.id`, `{user.id, workspace.id}`). The registry keys on
+`{scope_key, tab_id}` so different users and different tabs never collide.
+
+If no `tabId` signal is present in the request, `start_stream/2` falls
+back to `Dstar.start/1` — so existing streams keep working while you
+roll out the client-side signal.
+
+### What it does
+
+| Scenario | Before | After |
+|---|---|---|
+| User clicks 5 pages in 3s (same tab) | 5 zombie processes doing wasted PubSub work | 1 process per tab, always |
+| 3 tabs open | 3 streams (fine) | 3 streams (unchanged) |
+| 100 users rapid nav | Spikes of zombies doing wasted DB queries | Max 100 processes, zero wasted work |
+
 ## Without Dispatch
 
 The Quick Start uses `Dstar.Plugs.Dispatch` to route events, but you can
@@ -451,6 +521,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.Scripts` | `execute/2,3`, `redirect/2,3`, `console_log/2,3` |
 | `Dstar.Plugs.Dispatch` | Standard Plug for dynamic event routing |
 | `Dstar.Plugs.RenameCsrfParam` | Standard Plug for CSRF param compatibility |
+| `Dstar.Utility.StreamRegistry` | Opt-in per-tab stream deduplication (see [Stream Deduplication](#stream-deduplication-optional)) |
 
 ## Dependencies
 

@@ -1,7 +1,7 @@
 defmodule Dstar.MixProject do
   use Mix.Project
 
-  @version "0.0.5"
+  @version "0.0.6"
   @source_url "https://github.com/ricotrevisan/dstar"
 
   def project do
@@ -49,7 +49,8 @@ defmodule Dstar.MixProject do
       extras: ["README.md", "CHANGELOG.md", "docs/migrating-from-phoenix-datastar.md"],
       groups_for_modules: [
         Core: [Dstar, Dstar.SSE, Dstar.Signals, Dstar.Elements, Dstar.Actions, Dstar.Scripts],
-        Plugs: [Dstar.Plugs.Dispatch, Dstar.Plugs.RenameCsrfParam]
+        Plugs: [Dstar.Plugs.Dispatch, Dstar.Plugs.RenameCsrfParam],
+        Utilities: [Dstar.Utility.StreamRegistry]
       ]
     ]
   end

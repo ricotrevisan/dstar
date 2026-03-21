@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.6 — 2026-03-21
+
+### Added
+
+- **`Dstar.Utility.StreamRegistry`** — Opt-in per-tab SSE stream
+  deduplication. Tracks one stream process per user+tab using Elixir's
+  `Registry`. When a new stream opens from the same tab, the previous process
+  is killed instantly — no waiting for keepalive timeouts or PubSub broadcasts.
+  Fixes zombie processes that hold subscriptions, run wasted DB queries, and
+  exhaust the browser's 6-connection-per-origin limit on HTTP/1.1. Add it to
+  your supervision tree, set a `tabId` signal in your root layout, and replace
+  `Dstar.start/1` with `Dstar.start_stream/2`. Falls back to `Dstar.start/1`
+  when no `tabId` is present. See the README's "Stream Deduplication" section
+  for full setup.
+
+- **`Dstar.start_stream/2`** — Convenience delegate to
+  `Dstar.Utility.StreamRegistry.start_stream/2`.
+
 ## 0.0.5 — 2026-03-18
 
 ### Added

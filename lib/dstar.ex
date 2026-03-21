@@ -39,6 +39,20 @@ defmodule Dstar do
   defdelegate start(conn), to: Dstar.SSE
 
   @doc """
+  Starts an SSE stream with per-tab deduplication.
+
+  Requires `Dstar.Utility.StreamRegistry` in your supervision tree
+  and a `tabId` signal in your root layout. See
+  `Dstar.Utility.StreamRegistry` module docs for setup.
+
+  ## Example
+
+      conn = Dstar.start_stream(conn, current_user.id)
+
+  """
+  defdelegate start_stream(conn, scope_key), to: Dstar.Utility.StreamRegistry
+
+  @doc """
   Checks if an SSE connection is still open.
 
   Returns `{:ok, conn}` if open, `{:error, conn}` if closed.
