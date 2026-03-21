@@ -11,7 +11,8 @@ defmodule Dstar.MixProject do
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      description: "Batteries-included Datastar toolkit for Elixir — event dispatch, CSRF handling, and per-tab stream deduplication on top of the full SSE primitive set. Drop into any Plug or Phoenix app.",
+      description:
+        "Batteries-included Datastar toolkit for Elixir: SSE primitives, event dispatch, CSRF, and more. For any Plug or Phoenix app.",
       package: package(),
       docs: docs()
     ]
