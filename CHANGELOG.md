@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.9 — 2026-04-16
+
+### Fixed
+
+- **README copy fixes.** The install snippet now references `~> 0.0.9`
+  (was stuck on `~> 0.0.7` in the v0.0.8 release). Removed two stale
+  mentions of "CSRF headers" in the URL-generation feature list and the
+  Quick Start — verb helpers stopped injecting CSRF headers in 0.0.8
+  when CSRF moved to the Phoenix meta tag. Removed a stray `T` after the
+  License section.
+
 ## 0.0.8 — 2026-04-16
 
 Consolidates the unreleased 0.0.7 work (CSRF rewrite, expanded usage rules)

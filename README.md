@@ -12,7 +12,7 @@
 Other libraries give you SSE primitives and leave the rest to you. Dstar gives you the primitives **and** the utilities you'd end up building yourself:
 
 - **Event dispatch** — One route, unlimited handlers. `Dstar.Plugs.Dispatch` routes events to handler modules by convention, so you never hand-wire a route per action.
-- **URL generation** — `Dstar.post/2`, `Dstar.get/2`, `Dstar.delete/2` generate `@post(...)` expressions with correct paths and CSRF headers. No hand-written URLs in templates.
+- **URL generation** — `Dstar.post/2`, `Dstar.get/2`, `Dstar.delete/2` generate `@post(...)` expressions with correct paths. No hand-written URLs in templates.
 - **CSRF handling** — Works out of the box with Datastar's header-based tokens. `Dstar.Plugs.RenameCsrfParam` bridges SSE and form-based routes so `Plug.CSRFProtection` just works.
 - **Stream deduplication** — `Dstar.Utility.StreamRegistry` kills zombie SSE processes when users navigate between pages. One process per tab, always.
 - **Console logging** — `Dstar.console_log/2` sends log/warn/error messages straight to the browser DevTools. Debug from the server, read in the browser.
@@ -29,7 +29,7 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "~> 0.0.7"}
+    {:dstar, "~> 0.0.9"}
   ]
 end
 ```
@@ -153,8 +153,10 @@ the same pipeline.
 ```
 
 `Dstar.post/2` pairs with `Dstar.Plugs.Dispatch` — it generates the
-`@post(...)` expression with the correct path and CSRF headers so you
-never hand-write URLs. One dispatch route, as many handlers as you want.
+`@post(...)` expression with the correct path so you never hand-write
+URLs. CSRF is handled separately via the standard Phoenix meta tag
+(see [CSRF Protection Setup](#csrf-protection-setup)). One dispatch
+route, as many handlers as you want.
 
 ### What just happened?
 
@@ -607,4 +609,3 @@ Just two:
 ## License
 
 MIT
-T
