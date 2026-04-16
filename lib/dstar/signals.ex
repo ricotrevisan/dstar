@@ -17,8 +17,10 @@ defmodule Dstar.Signals do
   @doc """
   Reads signals from a Plug connection.
 
-  For GET requests, reads from query parameters under the "datastar" key.
-  For other methods, reads from the JSON request body.
+  For GET and DELETE requests, reads from query parameters under the
+  "datastar" key. For other methods, reads from the JSON request body.
+  This matches Datastar v1.0's behavior, where GET and DELETE requests
+  do not carry a body.
 
   Returns a map of signals or an empty map if no signals are present.
 
@@ -29,7 +31,8 @@ defmodule Dstar.Signals do
 
   """
   @spec read(Plug.Conn.t()) :: map()
-  def read(%Plug.Conn{method: "GET", query_params: params}) do
+  def read(%Plug.Conn{method: method, query_params: params})
+      when method in ["GET", "DELETE"] do
     case Map.get(params, @datastar_key) do
       nil -> %{}
       json_string -> decode_signals(json_string)

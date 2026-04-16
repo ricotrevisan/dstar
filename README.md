@@ -5,6 +5,8 @@
 
 **The batteries-included Datastar toolkit for Elixir.** SSE helpers, event dispatch, CSRF handling, stream deduplication — everything you need to ship Datastar apps, not just the wire protocol.
 
+> Successor to [PhoenixDatastar](https://hex.pm/packages/phoenix_datastar).
+
 ## Why Dstar?
 
 Other libraries give you SSE primitives and leave the rest to you. Dstar gives you the primitives **and** the utilities you'd end up building yourself:
@@ -35,7 +37,7 @@ end
 Then add the Datastar client script to your root layout's `<head>`:
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0/bundles/datastar.js"></script>
 ```
 
 That's it. No generators, no config, no application callback.

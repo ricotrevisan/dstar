@@ -25,6 +25,20 @@ defmodule Dstar.SignalsTest do
       assert Signals.read(conn) == %{}
     end
 
+    test "reads signals from DELETE query params" do
+      conn = %Plug.Conn{
+        method: "DELETE",
+        query_params: %{"datastar" => ~s({"id":7})}
+      }
+
+      assert Signals.read(conn) == %{"id" => 7}
+    end
+
+    test "returns empty map when no datastar param on DELETE" do
+      conn = %Plug.Conn{method: "DELETE", query_params: %{}}
+      assert Signals.read(conn) == %{}
+    end
+
     test "reads signals from POST body params" do
       conn = %Plug.Conn{
         method: "POST",

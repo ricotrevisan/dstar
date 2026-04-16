@@ -1,6 +1,6 @@
 # Datastar Attributes Cheat Sheet
 
-> **Version:** Datastar 1.0.0-RC.8  
+> **Version:** Datastar v1.0.0  
 > **Audience:** Intermediate Elixir Phoenix developers using Dstar library  
 > **Purpose:** Quick reference for all client-side Datastar attributes with practical HEEx/Dstar examples
 
@@ -777,4 +777,4 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 
 - **Datastar Docs:** https://data-star.dev
 - **Dstar Library:** https://github.com/phaleth/dstar
-- **Version:** Datastar 1.0.0-RC.8
+- **Version:** Datastar v1.0.0

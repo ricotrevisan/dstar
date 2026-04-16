@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.0.8 — 2026-04-16
+
+Consolidates the unreleased 0.0.7 work (CSRF rewrite, expanded usage rules)
+with Datastar v1.0 compatibility fixes. Users on 0.0.6 upgrading to 0.0.8
+should read the **Changed** section — CSRF handling has been rewritten.
+
+### Changed
+
+- **CSRF is no longer transported through a Datastar signal.** Verb helpers
+  (`Dstar.post/2,3`, `get`, `put`, `patch`, `delete`) no longer inject an
+  `{headers: {'x-csrf-token': $_csrfToken}}` options object into generated
+  expressions. Datastar reads the token from Phoenix's standard
+  `<meta name="csrf-token">` tag and sends it as an `x-csrf-token` header
+  automatically. This decouples CSRF from Datastar's signal round-tripping
+  and shortens every generated expression.
+
+  **Migration from 0.0.6:** remove any `data-signals:_csrf-token` /
+  `$_csrfToken` signal from your root layout. Keep the standard Phoenix
+  `<meta name="csrf-token" content={get_csrf_token()}>` tag in `<head>`.
+  If you use Datastar-driven form POSTs that go through `Plug.CSRFProtection`,
+  expose the token as a **non-prefixed** `csrf` signal and keep
+  `Dstar.Plugs.RenameCsrfParam` in your pipeline — that plug's role is now
+  scoped to bridging form posts, not SSE.
+
+- **Datastar version references bumped from `1.0.0-RC.8` to `v1.0.0`** in
+  the README, `doc/readme.md`, and the `datastar-attributes` usage rule.
+  v1.0's other changes (new `data-bind` `__prop`/`__event` modifiers,
+  `data-on` `__document` modifier, morphing improvements,
+  `retryMaxWaitMs` → `retryMaxWait` rename, Rocket JS API rewrite) are all
+  client-side and need no Dstar changes.
+
+### Fixed
+
+- **`Dstar.Signals.read/1` now reads signals from query params for DELETE
+  requests.** Datastar v1.0 stopped sending a body on DELETE requests
+  ([#1144](https://github.com/starfederation/datastar/issues/1144)), so
+  signals from `Dstar.delete/2,3` actions arrived empty under the previous
+  code path. `read/1` now treats GET and DELETE the same — both read from
+  the `datastar` query param.
+
+### Added
+
+- **New usage-rules reference files** ship with the package: `error-handling.md`,
+  `heex-rendering.md`, `loading-states.md`, and a full `datastar-attributes.md`
+  cheat sheet. Consumers of the `usage_rules` package will pick these up
+  automatically.
+
+- **HTTP/2 SSE connection limit docs** added to the README, covering why the
+  browser 6-connection-per-origin cap on HTTP/1.1 matters for long-lived
+  Datastar streams and how HTTP/2 multiplexing removes it.
+
 ## 0.0.6 — 2026-03-21
 
 ### Added
