@@ -65,6 +65,20 @@ defmodule Dstar.Page.PlugTest do
     def render(assigns), do: ~H'<div id="never-halted">never rendered</div>'
   end
 
+  defmodule StreamPage do
+    use Dstar.Page, idle_check: 50
+
+    def render(assigns), do: ~H'<div id="s">stream</div>'
+
+    def handle_connect(conn, _params) do
+      send(:dstar_plug_stream_test, {:connected, self()})
+      conn
+    end
+
+    def handle_info({:tick, n}, conn), do: patch_signals(conn, %{tick: n})
+    def handle_info(:halt_now, conn), do: {:halt, conn}
+  end
+
   describe "event action (POST _event/:event)" do
     defp event_conn(event, signals) do
       conn(:post, "/counter/_event/#{event}")
@@ -100,6 +114,43 @@ defmodule Dstar.Page.PlugTest do
       assert_raise FunctionClauseError, fn ->
         PagePlug.call(conn, PagePlug.init({:event, CounterPage}))
       end
+    end
+  end
+
+  describe "stream action (POST)" do
+    test "404s when the page has no handle_connect" do
+      conn = PagePlug.call(conn(:post, "/bare"), PagePlug.init({:stream, BarePage}))
+      assert conn.status == 404
+    end
+
+    test "connects, dispatches handle_info, tolerates strays, halts on demand" do
+      Process.register(self(), :dstar_plug_stream_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_stream_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      task =
+        Task.async(fn ->
+          PagePlug.call(conn(:post, "/stream"), PagePlug.init({:stream, StreamPage}))
+        end)
+
+      assert_receive {:connected, stream_pid}, 1_000
+
+      send(stream_pid, {:tick, 7})
+      send(stream_pid, :unmatched_stray_message)
+      send(stream_pid, {:tick, 8})
+      send(stream_pid, :halt_now)
+
+      conn = Task.await(task, 2_000)
+
+      assert conn.state == :chunked
+      assert_patched_signals(conn, %{tick: 8})
+      # The stray message did not kill the loop: tick 8 arrived after it.
     end
   end
 

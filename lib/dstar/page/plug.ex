@@ -103,7 +103,59 @@ if Code.ensure_loaded?(Phoenix.Controller) do
       end
     end
 
-    # ── POST stream — implemented in Task 8 ─────────────────────────────
-    defp stream(conn, _page), do: send_resp(conn, 501, "not implemented")
+    # ── POST stream: connect, then library-owned receive loop ───────────
+
+    defp stream(conn, page) do
+      if function_exported?(page, :handle_connect, 2) do
+        conn = fetch_query_params(conn)
+
+        conn =
+          if function_exported?(page, :stream_key, 1) do
+            Dstar.start_stream(conn, page.stream_key(conn))
+          else
+            Dstar.SSE.start(conn)
+          end
+
+        conn = page.handle_connect(conn, conn.params)
+        loop(conn, page, page.__dstar__(:idle_check))
+      else
+        conn
+        |> put_resp_content_type("text/plain")
+        |> send_resp(404, "Not found")
+      end
+    end
+
+    defp loop(conn, page, idle_check) do
+      receive do
+        msg ->
+          case dispatch_info(page, msg, conn) do
+            {:halt, conn} -> conn
+            conn -> loop(conn, page, idle_check)
+          end
+      after
+        idle_check ->
+          case Dstar.check_connection(conn) do
+            {:ok, conn} -> loop(conn, page, idle_check)
+            {:error, conn} -> conn
+          end
+      end
+    end
+
+    # A message matching no handle_info/2 clause must not kill the stream.
+    # Only a FunctionClauseError raised by the head of the page's own
+    # handle_info/2 is absorbed; errors inside a matched clause propagate.
+    defp dispatch_info(page, msg, conn) do
+      page.handle_info(msg, conn)
+    rescue
+      exception in FunctionClauseError ->
+        if exception.module == page and exception.function == :handle_info and
+             exception.arity == 2 do
+          Logger.warning("#{inspect(page)} received unhandled message: #{inspect(msg)}")
+
+          conn
+        else
+          reraise exception, __STACKTRACE__
+        end
+    end
   end
 end
