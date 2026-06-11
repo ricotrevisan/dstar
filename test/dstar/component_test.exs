@@ -39,6 +39,13 @@ defmodule Dstar.ComponentTest do
              "@delete((document.body.dataset.dsPrefix || '') + '/ds/#{encoded}/remove')"
   end
 
+  test "event/2 passes a raw JS opts string through" do
+    encoded = Dstar.Actions.encode_module(DetailDrawer)
+
+    assert DetailDrawer.event("save", opts: "{retryMaxCount: 5}") ==
+             "@post((document.body.dataset.dsPrefix || '') + '/ds/#{encoded}/save', {retryMaxCount: 5})"
+  end
+
   test "event/2 raises on names containing a quote or slash" do
     assert_raise ArgumentError, fn -> DetailDrawer.event("bad'name") end
     assert_raise ArgumentError, fn -> DetailDrawer.event("bad/name") end

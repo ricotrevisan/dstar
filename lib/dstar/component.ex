@@ -57,8 +57,6 @@ defmodule Dstar.Component do
       import Dstar,
         only: [
           start: 1,
-          start_stream: 2,
-          check_connection: 1,
           read_signals: 1,
           patch_signals: 2,
           patch_signals: 3,
@@ -81,14 +79,15 @@ defmodule Dstar.Component do
       Builds a Datastar action expression targeting this component's
       dispatch URL, prefixed client-side by `document.body.dataset.dsPrefix`.
       """
-      def event(name, opts \\ []) when is_binary(name) do
+      def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
         Dstar.Component.build_event(__MODULE__, name, opts)
       end
     end
   end
 
   @doc false
-  def build_event(module, name, opts) when is_atom(module) and is_binary(name) do
+  def build_event(module, name, opts)
+      when is_atom(module) and is_binary(name) and is_list(opts) do
     if String.contains?(name, ["'", "/"]) do
       raise ArgumentError,
             "event name must not contain \"'\" or \"/\", got: #{inspect(name)}"
