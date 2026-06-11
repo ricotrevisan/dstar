@@ -3,3 +3,5 @@ deps
 doc
 *.tar
 .claude/*local*
+.codex/
+plans/

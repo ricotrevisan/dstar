@@ -36,7 +36,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
       conn = conn |> fetch_query_params() |> ensure_html_format()
 
       conn =
-        if function_exported?(page, :mount, 2) do
+        if exported?(page, :mount, 2) do
           page.mount(conn, conn.params)
         else
           conn
@@ -106,7 +106,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     # ── POST stream: connect, then library-owned receive loop ───────────
 
     defp stream(conn, page) do
-      if function_exported?(page, :handle_connect, 2) do
+      if exported?(page, :handle_connect, 2) do
         conn = fetch_query_params(conn)
 
         conn =
@@ -135,7 +135,13 @@ if Code.ensure_loaded?(Phoenix.Controller) do
         {:plug_conn, :sent} ->
           loop(conn, page, idle_check)
 
-        msg ->
+        # Bandit's HTTP/2 stream runs in this same process and delivers
+        # flow-control messages ({:bandit, {:send_window_update, _}} etc.)
+        # to its mailbox, consuming them by selective receive inside its
+        # send path. The guard skips them so they stay in the mailbox —
+        # consuming them here would break flow control and stall the
+        # stream once the send window drains.
+        msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
           case dispatch_info(page, msg, conn) do
             {:halt, conn} -> conn
             conn -> loop(conn, page, idle_check)
@@ -147,6 +153,13 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             {:error, conn} -> conn
           end
       end
+    end
+
+    # function_exported?/3 alone returns false for modules the code server
+    # has not loaded yet, so under lazy loading (dev/test, fresh VM) the
+    # first request would silently skip mount/2 or 404 the stream.
+    defp exported?(module, fun, arity) do
+      Code.ensure_loaded?(module) and function_exported?(module, fun, arity)
     end
 
     # A message matching no handle_info/2 clause must not kill the stream.

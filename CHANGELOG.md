@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.1.0-alpha.2 — 2026-06-11
+
+### Added
+
+- **`mix dstar.https`** — one-command trusted HTTPS for dev. Adds a
+  `my-app.test` entry to `/etc/hosts` and generates a browser-trusted
+  certificate via mkcert, enabling HTTP/2 so SSE streams don't exhaust the
+  browser's 6-connection HTTP/1.1 limit. Tries cached `sudo -n` first,
+  falls back to a GUI prompt on macOS (`osascript`) and interactive sudo
+  on Linux; detects conflicting hosts entries before touching anything.
+  Supports `--host`, `--cert`, `--key`, `--ip`, `--dry-run`, and `--yes`.
+
+### Fixed
+
+- **`Dstar.Page.Plug`'s stream loop no longer consumes Bandit's HTTP/2
+  flow-control messages.** Over HTTP/2, Bandit runs each stream in its own
+  process and delivers `{:bandit, {:send_window_update, _}}` (and friends)
+  to that process's mailbox, consuming them by selective receive inside
+  its send path. The library loop's catch-all `receive` stole those
+  messages, logging them as unhandled page messages and — worse —
+  discarding the window credit, which would stall the stream with a
+  flow-control timeout once the send window drained. The loop now skips
+  `{:bandit, _}` messages so Bandit finds them where it expects them.
+
+- **`Dstar.Page.Plug` now loads the page module before probing its
+  callbacks.** `function_exported?/3` returns `false` for modules the code
+  server has not loaded yet, so under lazy code loading (dev and test on a
+  fresh VM) the first GET to a page silently skipped `mount/2` — typically
+  crashing `render/1` with a `KeyError` — and the first stream POST
+  returned 404 despite a defined `handle_connect/2`. The plug now calls
+  `Code.ensure_loaded?/1` before `function_exported?/3`.
+
 ## 0.1.0-alpha.1
 
 The unified page module release. A Datastar page is now one module and

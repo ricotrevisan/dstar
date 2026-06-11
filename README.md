@@ -30,7 +30,7 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "0.1.0-alpha.1"}
+    {:dstar, "0.1.0-alpha.2"}
   ]
 end
 ```
@@ -480,6 +480,21 @@ connection, so SSE streams no longer compete with other requests. Bandit
 config beyond enabling HTTPS.
 
 ### Enable HTTPS in dev
+
+The fast path is the built-in task ([mkcert](https://github.com/FiloSottile/mkcert) required, `brew install mkcert nss` on macOS):
+
+```bash
+mix dstar.https
+```
+
+It adds a `my-app.test` entry to `/etc/hosts` and generates a
+**browser-trusted** certificate via mkcert's local CA — no certificate
+warnings, and tools that reject self-signed certs keep working. It asks
+before touching anything (`--dry-run` to preview, `mix help dstar.https`
+for all options), then prints the `config/dev.exs` snippet to apply.
+Steps 3–4 and 6 below still apply.
+
+#### Manual setup (no mkcert)
 
 1. Generate a self-signed certificate:
 

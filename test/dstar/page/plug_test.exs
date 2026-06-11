@@ -76,6 +76,12 @@ defmodule Dstar.Page.PlugTest do
     end
 
     def handle_info({:tick, n}, conn), do: patch_signals(conn, %{tick: n})
+
+    def handle_info({:ping, from}, conn) do
+      send(from, :pong)
+      conn
+    end
+
     def handle_info(:halt_now, conn), do: {:halt, conn}
   end
 
@@ -168,6 +174,41 @@ defmodule Dstar.Page.PlugTest do
       # The stray message did not kill the loop: tick 8 arrived after it.
     end
 
+    test "leaves Bandit flow-control messages in the mailbox" do
+      Process.register(self(), :dstar_plug_stream_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_stream_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      task =
+        Task.async(fn ->
+          PagePlug.call(conn(:post, "/stream"), PagePlug.init({:stream, StreamPage}))
+        end)
+
+      assert_receive {:connected, stream_pid}, 1_000
+
+      # Bandit's HTTP/2 stream consumes these by selective receive in its
+      # send path; the loop must skip them, not dispatch or drop them.
+      send(stream_pid, {:bandit, {:send_window_update, 1234}})
+      send(stream_pid, {:ping, self()})
+
+      # The pong proves the loop processed a message queued BEHIND the
+      # Bandit message, which therefore was skipped over, not consumed.
+      assert_receive :pong, 1_000
+
+      assert {:messages, [{:bandit, {:send_window_update, 1234}}]} =
+               Process.info(stream_pid, :messages)
+
+      send(stream_pid, :halt_now)
+      conn = Task.await(task, 2_000)
+      assert conn.state == :chunked
+    end
+
     test "opens via start_stream when stream_key/1 is defined" do
       Process.register(self(), :dstar_plug_stream_test)
 
@@ -223,6 +264,44 @@ defmodule Dstar.Page.PlugTest do
       assert conn.status == 401
       assert conn.halted
       refute conn.resp_body =~ "never rendered"
+    end
+
+    test "mounts pages the code server has not loaded yet" do
+      # On a fresh VM (lazy code loading) the page beam sits on disk unloaded.
+      # function_exported?/3 alone would report no mount/2 and skip it.
+      [{mod, beam}] =
+        Code.compile_string("""
+        defmodule Dstar.Page.PlugTest.LazyPage do
+          use Dstar.Page
+
+          def mount(conn, _params), do: assign(conn, marker: "lazy-mounted")
+
+          def render(assigns), do: ~H"<div id='lazy'>{@marker}</div>"
+        end
+        """)
+
+      dir = Path.join(System.tmp_dir!(), "dstar_lazy_page_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "#{mod}.beam"), beam)
+      true = Code.append_path(dir)
+
+      on_exit(fn ->
+        Code.delete_path(dir)
+        :code.purge(mod)
+        :code.delete(mod)
+        File.rm_rf!(dir)
+      end)
+
+      # Unload the freshly created module so only the on-disk beam remains.
+      :code.purge(mod)
+      :code.delete(mod)
+      :code.purge(mod)
+      refute :erlang.module_loaded(mod)
+
+      conn = PagePlug.call(conn(:get, "/lazy"), PagePlug.init({:page, mod}))
+
+      assert conn.status == 200
+      assert conn.resp_body =~ "lazy-mounted"
     end
   end
 end
