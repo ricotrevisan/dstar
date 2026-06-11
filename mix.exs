@@ -28,6 +28,8 @@ defmodule Dstar.MixProject do
     [
       {:plug, "~> 1.14"},
       {:jason, "~> 1.4"},
+      {:phoenix, "~> 1.7", optional: true},
+      {:phoenix_live_view, "~> 1.0", optional: true},
       {:ex_doc, "~> 0.29", only: :dev, runtime: false}
     ]
   end
