@@ -9,11 +9,12 @@ defmodule Dstar.Test do
       assert_patched_element(conn, "#history")
   """
 
-  import ExUnit.Assertions
+  import ExUnit.Assertions, only: [assert: 2]
 
   @doc """
   Parses the SSE events from a conn (or raw body string) into a list of
   `%{type: String.t() | nil, data: [String.t()]}`.
+  This parser understands Dstar's own SSE output format ("event: " / "data: " with a trailing space, LF line endings) — it is not a general-purpose SSE parser.
   """
   def sse_events(%Plug.Conn{} = conn), do: sse_events(conn.resp_body || "")
 
@@ -38,6 +39,12 @@ defmodule Dstar.Test do
     if type != nil or data != [], do: %{type: type, data: data}
   end
 
+  defp deep_merge(m1, m2) when is_map(m1) and is_map(m2) do
+    Map.merge(m1, m2, fn _key, v1, v2 -> deep_merge(v1, v2) end)
+  end
+
+  defp deep_merge(_v1, v2), do: v2
+
   @doc """
   Returns the merged map of all signals patched on the conn.
   """
@@ -47,7 +54,7 @@ defmodule Dstar.Test do
     |> Enum.filter(&(&1.type == "datastar-patch-signals"))
     |> Enum.flat_map(& &1.data)
     |> Enum.reduce(%{}, fn
-      "signals " <> json, acc -> Map.merge(acc, Jason.decode!(json))
+      "signals " <> json, acc -> deep_merge(acc, Jason.decode!(json))
       _line, acc -> acc
     end)
   end
@@ -99,5 +106,10 @@ defmodule Dstar.Test do
              "Element events: #{inspect(events)}"
 
     conn
+  end
+
+  def assert_patched_element(_conn, target) do
+    raise ArgumentError,
+          "assert_patched_element/2 only supports \"#id\" targets, got: #{inspect(target)}"
   end
 end

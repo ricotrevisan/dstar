@@ -45,6 +45,15 @@ defmodule Dstar.TestTest do
         assert_patched_signals(conn, %{count: 2})
       end
     end
+
+    test "deep-merges nested signal patches like the Datastar client" do
+      conn =
+        sse_conn()
+        |> Dstar.patch_signals(%{user: %{name: "rico"}})
+        |> Dstar.patch_signals(%{user: %{count: 5}})
+
+      assert_patched_signals(conn, %{user: %{"name" => "rico", "count" => 5}})
+    end
   end
 
   describe "assert_patched_element/2" do
@@ -63,6 +72,12 @@ defmodule Dstar.TestTest do
 
       assert_raise ExUnit.AssertionError, fn ->
         assert_patched_element(conn, "#nope")
+      end
+    end
+
+    test "raises ArgumentError for non-id targets" do
+      assert_raise ArgumentError, fn ->
+        assert_patched_element(sse_conn(), ".classname")
       end
     end
   end
