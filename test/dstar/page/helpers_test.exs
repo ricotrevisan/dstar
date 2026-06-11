@@ -1,0 +1,78 @@
+defmodule Dstar.Page.HelpersTest do
+  use ExUnit.Case, async: true
+  import Plug.Test
+
+  import Dstar.Page.Helpers
+
+  describe "event/1,2" do
+    test "builds a page-local @post expression" do
+      assert event("increment") == "@post(location.pathname + '/_event/increment')"
+    end
+
+    test "supports event names with interpolated ids" do
+      assert event("toggle_item:123") ==
+               "@post(location.pathname + '/_event/toggle_item:123')"
+    end
+
+    test "supports verb override" do
+      assert event("remove", verb: :delete) ==
+               "@delete(location.pathname + '/_event/remove')"
+    end
+
+    test "raises on unknown verb" do
+      assert_raise ArgumentError, fn -> event("x", verb: :head) end
+    end
+
+    test "appends raw options object" do
+      assert event("save", opts: "{retryMaxCount: 5}") ==
+               "@post(location.pathname + '/_event/save', {retryMaxCount: 5})"
+    end
+  end
+
+  describe "connect/0,1" do
+    test "builds the stream connect expression" do
+      assert connect() == "@post(location.pathname, {retryMaxCount: Infinity})"
+    end
+
+    test "allows overriding the options object" do
+      assert connect(opts: "{retryMaxCount: 3}") ==
+               "@post(location.pathname, {retryMaxCount: 3})"
+    end
+  end
+
+  describe "patch/3,4" do
+    defp history(assigns) do
+      # A function component without ~H: returns safe HTML directly.
+      {:safe, ~s(<span id="history">Last: #{assigns.value}</span>)}
+    end
+
+    test "renders a component fun into a patch-elements event" do
+      conn =
+        conn(:post, "/")
+        |> Dstar.SSE.start()
+        |> patch(&history/1, value: 3)
+
+      assert conn.resp_body =~ "event: datastar-patch-elements"
+      assert conn.resp_body =~ ~s(<span id="history">Last: 3</span>)
+    end
+
+    test "passes opts through to Dstar.Elements.patch" do
+      conn =
+        conn(:post, "/")
+        |> Dstar.SSE.start()
+        |> patch(&history/1, [value: 1], selector: "#slot", mode: :inner)
+
+      assert conn.resp_body =~ "data: selector #slot"
+      assert conn.resp_body =~ "data: mode inner"
+    end
+
+    test "accepts a map of assigns" do
+      conn =
+        conn(:post, "/")
+        |> Dstar.SSE.start()
+        |> patch(&history/1, %{value: 9})
+
+      assert conn.resp_body =~ "Last: 9"
+    end
+  end
+end

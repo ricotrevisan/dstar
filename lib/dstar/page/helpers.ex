@@ -1,0 +1,81 @@
+defmodule Dstar.Page.Helpers do
+  @moduledoc """
+  Template and handler helpers imported by `use Dstar.Page`.
+
+  - `event/1,2` — Datastar action expression targeting the page's own
+    `_event` route, resolved client-side via `location.pathname`.
+  - `connect/0,1` — Datastar action expression opening the page's SSE stream.
+  - `patch/3,4` — render a function component into a `patch_elements` call.
+  """
+
+  @verbs ~w(get post put patch delete)a
+
+  @doc """
+  Builds a page-local Datastar action expression.
+
+      event("increment")
+      #=> "@post(location.pathname + '/_event/increment')"
+
+      event("remove", verb: :delete)
+      #=> "@delete(location.pathname + '/_event/remove')"
+
+  The URL is computed in the browser, so path params (workspace slugs,
+  ids) need no server-side threading. Event names become a single URL
+  path segment: they must not contain `/` or `'`.
+
+  ## Options
+
+  - `:verb` — `:get | :post | :put | :patch | :delete` (default `:post`)
+  - `:opts` — raw JS object string appended as the action's options,
+    e.g. `"{retryMaxCount: 5}"`
+  """
+  def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
+    verb = Keyword.get(opts, :verb, :post)
+
+    unless verb in @verbs do
+      raise ArgumentError,
+            "invalid verb: #{inspect(verb)}. Must be one of #{inspect(@verbs)}"
+    end
+
+    args = "location.pathname + '/_event/#{name}'"
+
+    args =
+      case Keyword.get(opts, :opts) do
+        nil -> args
+        extra when is_binary(extra) -> args <> ", " <> extra
+      end
+
+    "@#{verb}(#{args})"
+  end
+
+  @doc """
+  Builds the stream-connect expression for `data-init` /
+  `data-on:online__window`.
+
+      connect()
+      #=> "@post(location.pathname, {retryMaxCount: Infinity})"
+
+  ## Options
+
+  - `:opts` — override the options object (default `"{retryMaxCount: Infinity}"`)
+  """
+  def connect(opts \\ []) when is_list(opts) do
+    extra = Keyword.get(opts, :opts, "{retryMaxCount: Infinity}")
+    "@post(location.pathname, #{extra})"
+  end
+
+  @doc """
+  Renders a function component and pipes it to `Dstar.Elements.patch/3`.
+
+      conn |> patch(&history/1, value: count)
+      conn |> patch(&item_card/1, [item: item], selector: "#row-1", mode: :outer)
+
+  With no `:selector`, Datastar matches elements by their `id` attribute,
+  so the component's root element must carry one.
+  """
+  def patch(conn, component, assigns, opts \\ [])
+      when is_function(component, 1) and (is_list(assigns) or is_map(assigns)) do
+    html = component.(Map.new(assigns))
+    Dstar.Elements.patch(conn, html, opts)
+  end
+end
