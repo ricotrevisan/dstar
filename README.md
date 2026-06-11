@@ -19,7 +19,7 @@ Other libraries give you SSE primitives and leave the rest to you. Dstar gives y
 - **Console logging** — `Dstar.console_log/2` sends log/warn/error messages straight to the browser DevTools. Debug from the server, read in the browser.
 - **Phoenix.HTML support** — `patch_elements` accepts both raw strings and `Phoenix.HTML.safe()` tuples, so HEEx template output works without conversion.
 
-The functional core is still a small bag of functions with no processes. The page layer on top is one behaviour, one plug, and two router macros — all optional, all readable. The one optional process — `StreamRegistry` — is opt-in only if you need stream deduplication.
+The functional core is still a small bag of functions with no processes. The page layer on top is one behaviour, one plug, and two router macros — all opt-in, all readable. The one optional process — `StreamRegistry` — is opt-in only if you need stream deduplication.
 
 Drop it into any Plug-based app: Phoenix controllers, plain Plug, Bandit. If you have a `%Plug.Conn{}`, you can use Dstar.
 
@@ -168,6 +168,8 @@ dstar_components "/ds", [MyAppWeb.DetailDrawer]
 Pages embed `<MyAppWeb.DetailDrawer.drawer item={@item} />` and need zero
 `handle_event` clauses for it. If your app mounts routes under a prefix,
 declare it once in the root layout: `<body data-ds-prefix={...}>`.
+
+Unlike page handlers, component handlers call `start()` themselves — the dispatch plug doesn't start the SSE response for them.
 
 ## The functional core
 
@@ -341,8 +343,6 @@ conn |> Dstar.console_log("Warning!", level: :warn)
 
 With `Dstar.Page`, declare subscriptions in `handle_connect/2` and implement `handle_info/2` — the library owns the loop (see Quick Start). The hand-rolled loop below remains fully supported for plain controllers:
 
-For real-time features (chat, tickers, notifications), use PubSub and a receive loop in your controller. The library doesn't need to own this — PubSub is the real-time primitive.
-
 ```elixir
 defmodule MyAppWeb.TickerController do
   use MyAppWeb, :controller
@@ -407,6 +407,8 @@ one is killed instantly — zero-delay cleanup, no wasted work.
 This is the **one process** in Dstar. It's opt-in: if you don't need it,
 the library stays zero-process. If you do, you add one child to your
 existing supervision tree.
+
+> With `Dstar.Page`, just define a `stream_key/1` callback — `Dstar.Page.Plug` calls `start_stream/2` for you. The manual `start`/`start_stream` swap in step 3 below applies to hand-rolled controller loops.
 
 ### 1. Add to your supervision tree
 
@@ -528,8 +530,7 @@ problem entirely.
 
 ## Without Dispatch
 
-The Quick Start uses `Dstar.Plugs.Dispatch` to route events, but you can
-skip it entirely and use plain controller actions:
+You can skip both the page model and the dispatch plug entirely and use plain controller actions:
 
 ```elixir
 # router.ex
@@ -567,9 +568,7 @@ Ensure your layout `<head>` includes Phoenix's standard CSRF meta tag:
 <meta name="csrf-token" content={get_csrf_token()} />
 ```
 
-`Dstar.post/2,3` and the other verb helpers read that tag directly and send it as an `x-csrf-token` header.
-
-That means Datastar's normal signal round-tripping does **not** rewrite the helper's CSRF header.
+Datastar itself reads that `<meta name="csrf-token">` tag and sends its value as an `x-csrf-token` header on every `@post` — whether the expression came from a verb helper like `Dstar.post/2`, a page's `event()`, or was hand-written. This works for all Dstar-generated action expressions including page events.
 
 ### For mixed SSE + form routes
 

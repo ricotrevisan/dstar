@@ -69,9 +69,9 @@ Key rules:
 
 ## What Dstar Is
 
-Dstar is a **minimalist SSE library** (~700 lines) providing pure functions over `Plug.Conn` to format and send Server-Sent Events for Datastar client-side framework. Two deps: `plug` and `jason`.
+Dstar is a **minimalist SSE library** providing pure functions over `Plug.Conn` to format and send Server-Sent Events for Datastar client-side framework.
 
-**Not:** LiveView, PhoenixDatastar, a framework, or a state management system. No processes, GenServers, supervision trees, behaviours, or macros.
+**Not:** LiveView, PhoenixDatastar, a framework, or a state management system. The **functional core** has no processes, GenServers, supervision trees, behaviours, or macros — two deps: `plug` and `jason`. The page layer (`Dstar.Page`, `Dstar.Component`, `Dstar.Router`) adds one behaviour, one plug, and two router macros on top, and is entirely opt-in.
 
 ## Core Pattern
 
