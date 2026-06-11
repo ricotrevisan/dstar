@@ -31,9 +31,9 @@ conflicting imports (`Plug.Conn.assign/3` vs `Phoenix.Component.assign/2,3`), an
    and implement `handle_info/2`; the loop, idle checks, and cleanup are library code.
 4. **Router macro.** `dstar "/path", Module` wires the page's GET render, event POST, and
    stream POST in one line. The route is the allowlist.
-5. **Implementation: behaviour + runner plug** (not macro-injected controller). `use Dstar.Page`
+5. **Implementation: behaviour + dispatcher plug** (not macro-injected controller). `use Dstar.Page`
    is a thin macro (behaviour, imports, helpers). All control flow lives in a plain, testable
-   `Dstar.Page.Runner` module that routes target.
+   `Dstar.Page.Plug` module that routes target.
 6. **`Dstar.Component` is in scope for v1.** Shared UI + its event handlers in one module
    (LiveComponent's colocation without its state machinery).
 7. **No socket struct, no server-side page state.** Conn in, conn out, everywhere. State lives
@@ -161,12 +161,12 @@ dstar "/:workspace_slug/meetings/:meeting_ref/prewrite", DefactoWeb.Meetings.Pre
 dstar_components "/ds", [DefactoWeb.Items.DetailDrawer]
 ```
 
-`dstar/2` expands to plain Phoenix routes targeting `Dstar.Page.Runner` with `page: Module`:
+`dstar/2` expands to plain Phoenix routes targeting `Dstar.Page.Plug` with `page: Module`:
 
 ```
-GET   /path                 → Runner.page    (mount + render)
-POST  /path                 → Runner.stream  (handle_connect + loop)
-POST  /path/_event/:event   → Runner.event   (handle_event)
+GET   /path                 → Page.Plug.page    (mount + render)
+POST  /path                 → Page.Plug.stream  (handle_connect + loop)
+POST  /path/_event/:event   → Page.Plug.event   (handle_event)
 ```
 
 - The route **is** the allowlist: a page is reachable because you routed it. No module-name
@@ -180,7 +180,7 @@ POST  /path/_event/:event   → Runner.event   (handle_event)
 `dstar_components/2` expands to `post "<base>/:module/:event"` targeting `Dstar.Plugs.Dispatch`
 with the given allowlist — sugar over the existing plug.
 
-## `Dstar.Page.Runner`
+## `Dstar.Page.Plug`
 
 A plain module of ordinary functions; routes point at it as a plug. No macro-generated control
 flow.
@@ -220,10 +220,10 @@ end
 
 ### Error handling
 
-- `mount` redirect/halt: Runner checks `conn.halted` / response state before rendering.
+- `mount` redirect/halt: the plug checks `conn.halted` / response state before rendering.
 - `handle_event` crash: request process crashes as in any controller action. Because SSE is
   already started, the browser sees a dead stream rather than a 500 page. Mitigation:
-  `config :dstar, debug_errors: true` (docs instruct setting it in `dev.exs`) makes the Runner
+  `config :dstar, debug_errors: true` (docs instruct setting it in `dev.exs`) makes the plug
   rescue, push the error + stacktrace to the browser console via
   `console_log(level: :error)`, then re-raise. Default: `false`.
 - Unknown event name with no matching clause = `FunctionClauseError` = a bug; it crashes (with
@@ -265,7 +265,7 @@ end
 
 - Pages embed it as a plain function component (`<DetailDrawer.drawer item={@item} />`) and
   need zero `handle_event` clauses for it.
-- `use Dstar.Component` = `use Dstar.Page`'s macro minus the page behaviour/runner concerns:
+- `use Dstar.Component` = `use Dstar.Page`'s macro minus the page behaviour and plug concerns:
   `Phoenix.Component` + assign shim + `import Dstar` + helpers, where `event/1,2` targets the
   component's dispatch URL instead of `location.pathname`.
 - **Prefix handling:** the root layout declares the mount prefix once —
@@ -288,7 +288,7 @@ end
   `post(conn, "/counter/_event/increment")` — chunked SSE accumulates in `conn.resp_body`.
 - **`Dstar.Test`** (new, small): parses SSE events out of a test conn and provides assertions:
   `assert_patched_signals(conn, %{count: 1})`, `assert_patched_element(conn, "#history")`.
-- **Runner:** tested in dstar itself as plain functions. Streams are unit-tested via callbacks;
+- **Page.Plug:** tested in dstar itself as plain functions. Streams are unit-tested via callbacks;
   full-stream integration tests are possible (task + timeout) but not the primary path.
 
 ## Dependencies
@@ -304,7 +304,7 @@ gets exactly today's Dstar.
 
 ## Naming
 
-`Dstar.Page`, `Dstar.Component`, `Dstar.Router`, `Dstar.Page.Runner`, `Dstar.Test`;
+`Dstar.Page`, `Dstar.Component`, `Dstar.Router`, `Dstar.Page.Plug`, `Dstar.Test`;
 macros `dstar/2`, `dstar_components/2`; helpers `event/1,2`, `connect/0,1`, `patch/3,4`.
 (`Dstar.Component` deliberately echoes `Phoenix.Component`; fallback name if the echo proves
 confusing in practice: `Dstar.Partial`.)
@@ -335,7 +335,7 @@ confusing in practice: `Dstar.Partial`.)
 - **Socket/assigns-diffing state model** — rebuilding LiveView; contradicts Datastar's
   client-holds-state model and the grug-simplify history.
 - **Stateful components (LiveComponent lifecycle)** — colocation only, see above.
-- **Macro-injected controller** (approach B) — control flow belongs in a readable runner
+- **Macro-injected controller** (approach B) — control flow belongs in a readable plug
   module, not macro expansion.
 - **Merge-modules-only** (approach C) — would not deliver the streaming and routing decisions.
 - **Non-POST event verbs in the router macro** — `event/2` supports verb overrides, but v1
