@@ -62,8 +62,33 @@ if Code.ensure_loaded?(Phoenix.Controller) do
       end
     end
 
-    # ── POST _event/:event — implemented in Task 7 ──────────────────────
-    defp event(conn, _page), do: send_resp(conn, 501, "not implemented")
+    # ── POST _event/:event: read signals, start SSE, handle_event ───────
+
+    defp event(conn, page) do
+      conn = fetch_query_params(conn)
+      event = conn.path_params["event"]
+      signals = Dstar.Signals.read(conn)
+      conn = Dstar.SSE.start(conn)
+
+      if Application.get_env(:dstar, :debug_errors, false) do
+        try do
+          page.handle_event(conn, event, signals)
+        rescue
+          exception ->
+            stacktrace = __STACKTRACE__
+
+            Dstar.console_log(
+              conn,
+              Exception.format(:error, exception, stacktrace),
+              level: :error
+            )
+
+            reraise exception, stacktrace
+        end
+      else
+        page.handle_event(conn, event, signals)
+      end
+    end
 
     # ── POST stream — implemented in Task 8 ─────────────────────────────
     defp stream(conn, _page), do: send_resp(conn, 501, "not implemented")

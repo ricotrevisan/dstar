@@ -65,6 +65,44 @@ defmodule Dstar.Page.PlugTest do
     def render(assigns), do: ~H'<div id="never-halted">never rendered</div>'
   end
 
+  describe "event action (POST _event/:event)" do
+    defp event_conn(event, signals) do
+      conn(:post, "/counter/_event/#{event}")
+      |> Map.put(:path_params, %{"event" => event})
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Map.put(:body_params, signals)
+    end
+
+    test "starts SSE and dispatches to handle_event with signals" do
+      conn = event_conn("increment", %{"count" => 2})
+      conn = PagePlug.call(conn, PagePlug.init({:event, CounterPage}))
+
+      assert conn.state == :chunked
+      assert conn.status == 200
+      assert_patched_signals(conn, %{count: 3})
+      assert_patched_element(conn, "#history")
+    end
+
+    test "handlers never call Dstar.start themselves" do
+      # CounterPage.handle_event has no Dstar.start — reaching :chunked
+      # proves the plug started SSE.
+      conn = event_conn("increment", %{})
+      conn = PagePlug.call(conn, PagePlug.init({:event, CounterPage}))
+      assert conn.state == :chunked
+    end
+
+    test "with debug_errors, a crash is relayed to the browser console and re-raised" do
+      Application.put_env(:dstar, :debug_errors, true)
+      on_exit(fn -> Application.delete_env(:dstar, :debug_errors) end)
+
+      conn = event_conn("explode", %{})
+
+      assert_raise FunctionClauseError, fn ->
+        PagePlug.call(conn, PagePlug.init({:event, CounterPage}))
+      end
+    end
+  end
+
   describe "page action (GET)" do
     test "mounts and renders HTML 200" do
       conn = conn(:get, "/counter?start=5")
