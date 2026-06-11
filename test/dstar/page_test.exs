@@ -5,7 +5,10 @@ defmodule Dstar.PageTest do
     use Dstar.Page
 
     def mount(conn, _params) do
-      assign(conn, count: 0)
+      conn
+      |> assign(count: 0)
+      |> assign_new(:title, fn -> "Counter" end)
+      |> update(:count, & &1)
     end
 
     def render(assigns) do
@@ -50,6 +53,7 @@ defmodule Dstar.PageTest do
   test "the assign shim works on conns inside mount" do
     conn = Plug.Test.conn(:get, "/") |> CounterPage.mount(%{})
     assert conn.assigns.count == 0
+    assert conn.assigns.title == "Counter"
   end
 
   test "handle_event pipes conn helpers and patch" do

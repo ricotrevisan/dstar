@@ -39,7 +39,7 @@ defmodule Dstar.Page do
   @callback mount(Plug.Conn.t(), params :: map()) :: Plug.Conn.t()
 
   @doc "The full-page HEEx template. Required."
-  @callback render(assigns :: map()) :: term()
+  @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
 
   @doc "Handles a Datastar event POST. SSE is already started. Optional."
   @callback handle_event(Plug.Conn.t(), event :: String.t(), signals :: map()) :: Plug.Conn.t()
@@ -61,6 +61,15 @@ defmodule Dstar.Page do
   @default_idle_check 30_000
 
   defmacro __using__(opts) do
+    unless Code.ensure_loaded?(Phoenix.Component) do
+      raise ArgumentError, """
+      `use Dstar.Page` requires the optional dependencies. Add to your deps:
+
+          {:phoenix, "~> 1.7"},
+          {:phoenix_live_view, "~> 1.0"}
+      """
+    end
+
     idle_check = Keyword.get(opts, :idle_check, @default_idle_check)
 
     quote do
