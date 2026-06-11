@@ -32,7 +32,9 @@ defmodule Dstar.SSETest do
       headers = Map.new(conn.resp_headers)
 
       assert headers["cache-control"] == "no-cache"
-      assert headers["connection"] == "keep-alive"
+      # Connection header is intentionally NOT set — forbidden in HTTP/2
+      # (RFC 9113 §8.2.2). See the SSE.start/1 docs.
+      refute Map.has_key?(headers, "connection")
       assert headers["content-type"] =~ "text/event-stream"
     end
 
