@@ -66,7 +66,14 @@ if Code.ensure_loaded?(Phoenix.Controller) do
 
     defp event(conn, page) do
       conn = fetch_query_params(conn)
-      event = conn.path_params["event"]
+
+      event =
+        conn.path_params["event"] ||
+          raise(
+            ArgumentError,
+            "missing :event path param — route the event POST with an `:event` segment"
+          )
+
       signals = Dstar.Signals.read(conn)
       conn = Dstar.SSE.start(conn)
 
@@ -77,11 +84,17 @@ if Code.ensure_loaded?(Phoenix.Controller) do
           exception ->
             stacktrace = __STACKTRACE__
 
-            Dstar.console_log(
-              conn,
-              Exception.format(:error, exception, stacktrace),
-              level: :error
-            )
+            # Best-effort: if the conn died mid-stream, console_log raising
+            # here would shadow the original exception.
+            try do
+              Dstar.console_log(
+                conn,
+                Exception.format(:error, exception, stacktrace),
+                level: :error
+              )
+            rescue
+              _ -> :ok
+            end
 
             reraise exception, stacktrace
         end
