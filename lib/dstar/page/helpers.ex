@@ -30,6 +30,11 @@ defmodule Dstar.Page.Helpers do
     e.g. `"{retryMaxCount: 5}"`
   """
   def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
+    if String.contains?(name, ["'", "/"]) do
+      raise ArgumentError,
+            "event name must not contain \"'\" or \"/\", got: #{inspect(name)}"
+    end
+
     verb = Keyword.get(opts, :verb, :post)
 
     unless verb in @verbs do
@@ -58,6 +63,8 @@ defmodule Dstar.Page.Helpers do
   ## Options
 
   - `:opts` — override the options object (default `"{retryMaxCount: Infinity}"`)
+
+  Always emits `@post` — Dstar streams connect over POST.
   """
   def connect(opts \\ []) when is_list(opts) do
     extra = Keyword.get(opts, :opts, "{retryMaxCount: Infinity}")

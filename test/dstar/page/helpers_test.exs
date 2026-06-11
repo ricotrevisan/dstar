@@ -27,6 +27,14 @@ defmodule Dstar.Page.HelpersTest do
       assert event("save", opts: "{retryMaxCount: 5}") ==
                "@post(location.pathname + '/_event/save', {retryMaxCount: 5})"
     end
+
+    test "raises on event name containing a single quote" do
+      assert_raise ArgumentError, fn -> event("bad'name") end
+    end
+
+    test "raises on event name containing a slash" do
+      assert_raise ArgumentError, fn -> event("bad/name") end
+    end
   end
 
   describe "connect/0,1" do
