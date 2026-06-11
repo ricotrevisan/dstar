@@ -20,6 +20,12 @@ defmodule Dstar.Page.AssignsTest do
       conn = conn(:get, "/") |> assign(%{count: 2})
       assert conn.assigns.count == 2
     end
+
+    test "assign/2 raises a clear error for a struct argument" do
+      assert_raise Protocol.UndefinedError, fn ->
+        conn(:get, "/") |> assign(DateTime.utc_now())
+      end
+    end
   end
 
   describe "assign_new/3 with %Plug.Conn{}" do

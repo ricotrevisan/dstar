@@ -17,8 +17,11 @@ if Code.ensure_loaded?(Phoenix.Component) do
 
         conn |> assign(:count, 1)
         conn |> assign(count: 1, name: "rico")
+
+    Keys must be atoms when assigning to a `%Plug.Conn{}`, matching `Plug.Conn.assign/3` semantics.
     """
-    def assign(%Plug.Conn{} = conn, key_values) when is_list(key_values) or is_map(key_values) do
+    def assign(%Plug.Conn{} = conn, key_values)
+        when is_list(key_values) or (is_map(key_values) and not is_struct(key_values)) do
       Enum.reduce(key_values, conn, fn {key, value}, acc -> Plug.Conn.assign(acc, key, value) end)
     end
 
@@ -38,7 +41,8 @@ if Code.ensure_loaded?(Phoenix.Component) do
     Assigns a value computed by `fun` only when `key` is absent.
     `fun` may take zero arguments or the current assigns.
     """
-    def assign_new(%Plug.Conn{} = conn, key, fun) when is_atom(key) and is_function(fun) do
+    def assign_new(%Plug.Conn{} = conn, key, fun)
+        when is_atom(key) and (is_function(fun, 0) or is_function(fun, 1)) do
       if Map.has_key?(conn.assigns, key) do
         conn
       else
