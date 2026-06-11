@@ -51,10 +51,22 @@ defmodule Dstar.MixProject do
       source_ref: "v#{@version}",
       extras: ["README.md", "CHANGELOG.md", "docs/migrating-from-phoenix-datastar.md"],
       groups_for_modules: [
-        Pages: [Dstar.Page, Dstar.Component, Dstar.Router, Dstar.Page.Plug,
-                Dstar.Page.Helpers, Dstar.Page.Assigns],
-        "Functional core": [Dstar, Dstar.SSE, Dstar.Signals, Dstar.Elements,
-                            Dstar.Actions, Dstar.Scripts],
+        Pages: [
+          Dstar.Page,
+          Dstar.Component,
+          Dstar.Router,
+          Dstar.Page.Plug,
+          Dstar.Page.Helpers,
+          Dstar.Page.Assigns
+        ],
+        "Functional core": [
+          Dstar,
+          Dstar.SSE,
+          Dstar.Signals,
+          Dstar.Elements,
+          Dstar.Actions,
+          Dstar.Scripts
+        ],
         Plugs: [Dstar.Plugs.Dispatch, Dstar.Plugs.RenameCsrfParam],
         Testing: [Dstar.Test],
         Utilities: [Dstar.Utility.StreamRegistry]
