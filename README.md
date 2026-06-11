@@ -30,10 +30,14 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "~> 0.1.0"}
+    {:dstar, "0.1.0-alpha.1"}
   ]
 end
 ```
+
+> The page layer is in alpha — the requirement is exact because `~>`
+> never resolves pre-releases. Prefer the stable functional core only?
+> `{:dstar, "~> 0.0.10"}` stays exactly as it was.
 
 Pages need `{:phoenix, "~> 1.7"}` and `{:phoenix_live_view, "~> 1.0"}` in your app (any Phoenix app already has them). The functional core needs neither.
 

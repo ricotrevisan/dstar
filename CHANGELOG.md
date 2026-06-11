@@ -1,9 +1,11 @@
 # Changelog
 
-## 0.1.0
+## 0.1.0-alpha.1
 
 The unified page module release. A Datastar page is now one module and
-one router line.
+one router line. Alpha until the page layer has survived its proving
+ground (a full production-app migration); the functional core is the
+same battle-tested code as 0.0.x.
 
 ### Added
 
