@@ -47,7 +47,9 @@ defmodule Dstar.PageTest do
   test "render/1 produces HEEx with the page-local event helper" do
     html = render_to_string(CounterPage.render(%{count: 0}))
     assert html =~ "data-signals:count"
-    assert html =~ "@post(location.pathname + &#39;/_event/increment&#39;)"
+
+    assert html =~
+             "@post(location.pathname.replace(/\\/+$/, &#39;&#39;) + &#39;/_event/increment&#39;)"
   end
 
   test "the assign shim works on conns inside mount" do

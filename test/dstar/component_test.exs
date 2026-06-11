@@ -36,14 +36,14 @@ defmodule Dstar.ComponentTest do
     encoded = Dstar.Actions.encode_module(DetailDrawer)
 
     assert DetailDrawer.event("remove", verb: :delete) ==
-             "@delete((document.body.dataset.dsPrefix || '') + '/ds/#{encoded}/remove')"
+             "@delete((document.body.dataset.dsPrefix || '').replace(/\\/+$/, '') + '/ds/#{encoded}/remove')"
   end
 
   test "event/2 passes a raw JS opts string through" do
     encoded = Dstar.Actions.encode_module(DetailDrawer)
 
     assert DetailDrawer.event("save", opts: "{retryMaxCount: 5}") ==
-             "@post((document.body.dataset.dsPrefix || '') + '/ds/#{encoded}/save', {retryMaxCount: 5})"
+             "@post((document.body.dataset.dsPrefix || '').replace(/\\/+$/, '') + '/ds/#{encoded}/save', {retryMaxCount: 5})"
   end
 
   test "event/2 raises on names containing a quote or slash" do

@@ -101,7 +101,9 @@ defmodule Dstar.Component do
     end
 
     encoded = Dstar.Actions.encode_module(module)
-    args = "(document.body.dataset.dsPrefix || '') + '/ds/#{encoded}/#{name}'"
+
+    args =
+      "(document.body.dataset.dsPrefix || '').replace(/\\/+$/, '') + '/ds/#{encoded}/#{name}'"
 
     args =
       case Keyword.get(opts, :opts) do

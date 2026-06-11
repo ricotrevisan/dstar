@@ -14,14 +14,18 @@ defmodule Dstar.Page.Helpers do
   Builds a page-local Datastar action expression.
 
       event("increment")
-      #=> "@post(location.pathname + '/_event/increment')"
+      #=> "@post(location.pathname.replace(/\\/+$/, '') + '/_event/increment')"
 
       event("remove", verb: :delete)
-      #=> "@delete(location.pathname + '/_event/remove')"
+      #=> "@delete(location.pathname.replace(/\\/+$/, '') + '/_event/remove')"
 
   The URL is computed in the browser, so path params (workspace slugs,
   ids) need no server-side threading. Event names become a single URL
   path segment: they must not contain `/` or `'`.
+
+  Trailing slashes in the path are stripped client-side so pages mounted
+  at "/" or visited with a trailing slash don't produce protocol-relative
+  ("//") or double-slash URLs.
 
   ## Options
 
@@ -42,7 +46,7 @@ defmodule Dstar.Page.Helpers do
             "invalid verb: #{inspect(verb)}. Must be one of #{inspect(@verbs)}"
     end
 
-    args = "location.pathname + '/_event/#{name}'"
+    args = "location.pathname.replace(/\\/+$/, '') + '/_event/#{name}'"
 
     args =
       case Keyword.get(opts, :opts) do

@@ -60,7 +60,7 @@ defmodule Dstar.RouterTest do
   end
 
   test "dstar_components wires the Dispatch plug" do
-    encoded = Dstar.Actions.encode_module(Drawer)
+    encoded = Dstar.Actions.encode_module(Dstar.RouterTest.Drawer)
 
     conn =
       conn(:post, "/ds/#{encoded}/ping")
@@ -75,5 +75,10 @@ defmodule Dstar.RouterTest do
   test "__event_path__ handles trailing slashes" do
     assert Dstar.Router.__event_path__("/counter") == "/counter/_event/:event"
     assert Dstar.Router.__event_path__("/counter/") == "/counter/_event/:event"
+  end
+
+  test "__dispatch_path__ handles trailing slashes" do
+    assert Dstar.Router.__dispatch_path__("/ds") == "/ds/:module/:event"
+    assert Dstar.Router.__dispatch_path__("/ds/") == "/ds/:module/:event"
   end
 end

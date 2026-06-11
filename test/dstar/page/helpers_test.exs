@@ -6,17 +6,18 @@ defmodule Dstar.Page.HelpersTest do
 
   describe "event/1,2" do
     test "builds a page-local @post expression" do
-      assert event("increment") == "@post(location.pathname + '/_event/increment')"
+      assert event("increment") ==
+               "@post(location.pathname.replace(/\\/+$/, '') + '/_event/increment')"
     end
 
     test "supports event names with interpolated ids" do
       assert event("toggle_item:123") ==
-               "@post(location.pathname + '/_event/toggle_item:123')"
+               "@post(location.pathname.replace(/\\/+$/, '') + '/_event/toggle_item:123')"
     end
 
     test "supports verb override" do
       assert event("remove", verb: :delete) ==
-               "@delete(location.pathname + '/_event/remove')"
+               "@delete(location.pathname.replace(/\\/+$/, '') + '/_event/remove')"
     end
 
     test "raises on unknown verb" do
@@ -25,7 +26,7 @@ defmodule Dstar.Page.HelpersTest do
 
     test "appends raw options object" do
       assert event("save", opts: "{retryMaxCount: 5}") ==
-               "@post(location.pathname + '/_event/save', {retryMaxCount: 5})"
+               "@post(location.pathname.replace(/\\/+$/, '') + '/_event/save', {retryMaxCount: 5})"
     end
 
     test "raises on event name containing a single quote" do
