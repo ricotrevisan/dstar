@@ -5,21 +5,17 @@ defmodule Dstar.Plugs.RenameCsrfParam do
 
   ## Why this exists
 
-  Dstar's verb helpers (`Dstar.post/2,3`, etc.) do **not** read CSRF from a
-  Datastar signal. They read the token from Phoenix's standard
-  `<meta name="csrf-token">` tag and send it as an `x-csrf-token` header.
-  That avoids any interaction between normal Datastar signal round-trips and
-  the CSRF header used by SSE routes.
+  Datastar has no built-in CSRF support — it does not read Phoenix's
+  `<meta name="csrf-token">` tag and never sets an `x-csrf-token` header.
+  `Plug.CSRFProtection` looks for the token in
+  `conn.body_params["_csrf_token"]` or the `x-csrf-token` header, so plain
+  Datastar requests fail CSRF protection out of the box.
 
-  However, regular Phoenix form POSTs (e.g. sign-in, settings) still go
-  through `Plug.CSRFProtection`, which looks for the token in
-  `conn.body_params["_csrf_token"]`.
-
-  If you want a Datastar-driven form request to satisfy that plug, you can
-  expose the token as a **non-prefixed** signal (default `csrf`). Because it
-  is not `_`-prefixed, Datastar will include it in each request body. This
-  plug then copies that param into `_csrf_token` in `body_params` before
-  `Plug.CSRFProtection` runs.
+  The fix: expose the token as a **non-prefixed** signal (default `csrf`).
+  Because it is not `_`-prefixed, Datastar includes it in every request
+  body — page events, stream connects, component events, and helper routes
+  alike. This plug then copies that param into `_csrf_token` in
+  `body_params` before `Plug.CSRFProtection` runs.
 
   ## Usage
 

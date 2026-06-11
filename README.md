@@ -110,6 +110,10 @@ That's the whole page. Notice what's *absent*:
   library starts the stream before calling you.
 - No allowlist registration — the `dstar` route *is* the allowlist.
 
+> **Routing through `:protect_from_forgery`?** Event POSTs need the CSRF
+> token as a signal — one plug plus one `<body>` attribute. See
+> [CSRF Protection Setup](#csrf-protection-setup).
+
 ### Streaming
 
 Declare how to subscribe; the library owns the receive loop:
@@ -558,34 +562,36 @@ you full routing control. Both use the same Dstar functions underneath.
 
 ## CSRF Protection Setup
 
-Dstar includes CSRF token handling for Datastar requests. Two approaches:
+Datastar has **no built-in CSRF support** — it does not read Phoenix's
+`<meta name="csrf-token">` tag and never sets an `x-csrf-token` header.
+(Verified against the v1 bundle: zero references to CSRF.) The token must
+travel as a signal.
 
-### For Dstar helper routes (recommended)
+### The signal pattern (pages, components, and helper routes alike)
 
-Ensure your layout `<head>` includes Phoenix's standard CSRF meta tag:
-
-```heex
-<meta name="csrf-token" content={get_csrf_token()} />
-```
-
-Datastar itself reads that `<meta name="csrf-token">` tag and sends its value as an `x-csrf-token` header on every `@post` — whether the expression came from a verb helper like `Dstar.post/2`, a page's `event()`, or was hand-written. This works for all Dstar-generated action expressions including page events.
-
-### For mixed SSE + form routes
-
-If you have regular Phoenix form POSTs that go through `Plug.CSRFProtection`, use `Dstar.Plugs.RenameCsrfParam`:
+1. Add the plug to your browser pipeline, before `:protect_from_forgery`:
 
 ```elixir
-# In your router, before :protect_from_forgery
 plug Dstar.Plugs.RenameCsrfParam
+plug :protect_from_forgery
 ```
 
-Then expose the token as a **non-prefixed** signal in your layout:
+2. Expose the token as a **non-prefixed** signal in your root layout:
 
 ```heex
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar will include it in each request body. The plug copies `conn.params["csrf"]` → `conn.body_params["_csrf_token"]` so `Plug.CSRFProtection` can find it.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request
+body. The plug copies it to `body_params["_csrf_token"]`, where
+`Plug.CSRFProtection` looks. This one setup covers page `event()` POSTs,
+stream `connect()` POSTs, component events, and the verb helpers.
+
+### Or: skip CSRF for SSE-only routes
+
+Pipe Datastar-only routes through a pipeline without `:protect_from_forgery`
+(the classic dispatch-route setup). Simpler, but then those endpoints rely on
+your session/auth checks alone.
 
 ## Lower-level Modules
 
