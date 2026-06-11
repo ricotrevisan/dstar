@@ -35,7 +35,25 @@ defmodule Dstar.RouterTest do
     dstar_components("/ds", [Dstar.RouterTest.Drawer])
   end
 
+  defmodule ScopedRouter do
+    use Phoenix.Router
+    import Dstar.Router
+
+    # Aliased scope: the page/component modules are written RELATIVE to the
+    # scope alias (like controllers and live views), and the dispatcher
+    # plugs must NOT get scope-prefixed. (`RouterTest.CounterPage` rather
+    # than bare `CounterPage` because nested defmodules above register
+    # lexical aliases that would pre-resolve the bare name — the standard
+    # Phoenix scope-aliasing caveat applies.)
+    scope "/app", Dstar do
+      dstar("/counter", RouterTest.CounterPage)
+      dstar_components("/ds", [RouterTest.Drawer])
+    end
+  end
+
   defp call(conn), do: TestRouter.call(conn, TestRouter.init([]))
+
+  defp call_scoped(conn), do: ScopedRouter.call(conn, ScopedRouter.init([]))
 
   test "GET page route renders the page" do
     conn = call(conn(:get, "/counter"))
@@ -70,6 +88,38 @@ defmodule Dstar.RouterTest do
 
     assert conn.state == :chunked
     assert_patched_signals(conn, %{pong: true})
+  end
+
+  describe "inside an aliased scope" do
+    test "GET page route resolves the relative page alias and renders" do
+      conn = call_scoped(conn(:get, "/app/counter"))
+      assert conn.status == 200
+      assert conn.resp_body =~ "counter"
+    end
+
+    test "POST event route dispatches without scope-prefixing the plug" do
+      conn =
+        conn(:post, "/app/counter/_event/increment")
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Map.put(:body_params, %{"count" => 4})
+        |> call_scoped()
+
+      assert conn.state == :chunked
+      assert_patched_signals(conn, %{count: 5})
+    end
+
+    test "dstar_components resolves relative component aliases" do
+      encoded = Dstar.Actions.encode_module(Dstar.RouterTest.Drawer)
+
+      conn =
+        conn(:post, "/app/ds/#{encoded}/ping")
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Map.put(:body_params, %{})
+        |> call_scoped()
+
+      assert conn.state == :chunked
+      assert_patched_signals(conn, %{pong: true})
+    end
   end
 
   test "__event_path__ handles trailing slashes" do

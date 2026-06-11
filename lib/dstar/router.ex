@@ -26,22 +26,36 @@ defmodule Dstar.Router do
 
   @doc """
   Wires a `Dstar.Page` module: GET render, POST stream, POST events.
+
+  Inside an aliased `scope`, the page module is scope-expanded like a
+  controller or live view — `dstar "/counter", CounterPage` inside
+  `scope "/", MyAppWeb` resolves to `MyAppWeb.CounterPage`.
   """
   defmacro dstar(path, page) do
     quote bind_quoted: [path: path, page: page] do
-      get(path, Dstar.Page.Plug, {:page, page})
-      post(path, Dstar.Page.Plug, {:stream, page})
-      post(Dstar.Router.__event_path__(path), Dstar.Page.Plug, {:event, page})
+      # Scope-expand the page (like `live/4` does for live views), and
+      # exempt the dispatcher plug from scope aliasing (alias: false) so
+      # routes inside `scope "/", MyAppWeb` don't target MyAppWeb.Dstar.Page.Plug.
+      page = Phoenix.Router.scoped_alias(__MODULE__, page)
+      get(path, Dstar.Page.Plug, {:page, page}, alias: false)
+      post(path, Dstar.Page.Plug, {:stream, page}, alias: false)
+      post(Dstar.Router.__event_path__(path), Dstar.Page.Plug, {:event, page}, alias: false)
     end
   end
 
   @doc """
   Wires `Dstar.Component` modules (or any `handle_event/3` handler
   modules) onto a single dispatch route under `base`.
+
+  Component modules are scope-expanded like controllers.
   """
   defmacro dstar_components(base, modules) do
     quote bind_quoted: [base: base, modules: modules] do
-      post(Dstar.Router.__dispatch_path__(base), Dstar.Plugs.Dispatch, modules: modules)
+      modules = Enum.map(modules, &Phoenix.Router.scoped_alias(__MODULE__, &1))
+
+      post(Dstar.Router.__dispatch_path__(base), Dstar.Plugs.Dispatch, [modules: modules],
+        alias: false
+      )
     end
   end
 
