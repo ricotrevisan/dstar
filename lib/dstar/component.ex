@@ -25,10 +25,17 @@ defmodule Dstar.Component do
   `Dstar.Plugs.Dispatch` (wire it with `Dstar.Router.dstar_components/2`).
 
   Unlike `Dstar.Page`, `event/2` here targets the component's dispatch
-  URL. When your app mounts the dispatch route under a path prefix,
-  declare it once in the root layout:
+  URL: `<base>/<encoded-module>/<event>`. The base defaults to `/ds` and
+  is read client-side from `<body data-ds-base="...">`, so it must match
+  the base you give `dstar_components/2`. Two common setups:
 
-      <body data-ds-prefix={workspace_path(@current_scope.workspace.slug)}>
+      # Router: dstar_components "/ds", [...]   (the default — no layout
+      # attribute needed)
+
+      # Custom base and/or app path prefix — declare it once in the root
+      # layout, including the dispatch segment:
+      #   Router: scope "/:workspace_slug" do dstar_components "/ds", [...] end
+      <body data-ds-base={workspace_path(@current_scope.workspace.slug) <> "/ds"}>
 
   Colocation only: no server-side component state, no lifecycle. State
   lives in signals, the DOM, and the database.
@@ -77,7 +84,7 @@ defmodule Dstar.Component do
 
       @doc """
       Builds a Datastar action expression targeting this component's
-      dispatch URL, prefixed client-side by `document.body.dataset.dsPrefix`.
+      dispatch URL: `(document.body.dataset.dsBase || '/ds') + '/<module>/<name>'`.
       """
       def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
         Dstar.Component.build_event(__MODULE__, name, opts)
@@ -102,8 +109,11 @@ defmodule Dstar.Component do
 
     encoded = Dstar.Actions.encode_module(module)
 
+    # The dispatch base comes from <body data-ds-base="...">, defaulting to
+    # "/ds". It must match the base given to `dstar_components/2` — keeping
+    # it client-side means one layout attribute covers app path prefixes too.
     args =
-      "(document.body.dataset.dsPrefix || '').replace(/\\/+$/, '') + '/ds/#{encoded}/#{name}'"
+      "(document.body.dataset.dsBase || '/ds').replace(/\\/+$/, '') + '/#{encoded}/#{name}'"
 
     args =
       case Keyword.get(opts, :opts) do

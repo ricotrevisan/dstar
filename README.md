@@ -175,7 +175,9 @@ dstar_components "/ds", [MyAppWeb.DetailDrawer]
 
 Pages embed `<MyAppWeb.DetailDrawer.drawer item={@item} />` and need zero
 `handle_event` clauses for it. If your app mounts routes under a prefix,
-declare it once in the root layout: `<body data-ds-prefix={...}>`.
+declare the dispatch base once in the root layout: `<body data-ds-base={...}>`
+(defaults to `/ds`; it must match the base given to `dstar_components/2`,
+including any app path prefix).
 
 Unlike page handlers, component handlers call `start()` themselves — the dispatch plug doesn't start the SSE response for them.
 
