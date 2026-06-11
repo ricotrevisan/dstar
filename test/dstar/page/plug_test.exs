@@ -79,6 +79,21 @@ defmodule Dstar.Page.PlugTest do
     def handle_info(:halt_now, conn), do: {:halt, conn}
   end
 
+  defmodule KeyedStreamPage do
+    use Dstar.Page, idle_check: 50
+
+    def render(assigns), do: ~H'<div id="k">keyed</div>'
+
+    def stream_key(_conn), do: :test_scope
+
+    def handle_connect(conn, _params) do
+      send(:dstar_plug_stream_test, {:keyed_connected, self()})
+      conn
+    end
+
+    def handle_info(:halt_now, conn), do: {:halt, conn}
+  end
+
   describe "event action (POST _event/:event)" do
     defp event_conn(event, signals) do
       conn(:post, "/counter/_event/#{event}")
@@ -151,6 +166,29 @@ defmodule Dstar.Page.PlugTest do
       assert conn.state == :chunked
       assert_patched_signals(conn, %{tick: 8})
       # The stray message did not kill the loop: tick 8 arrived after it.
+    end
+
+    test "opens via start_stream when stream_key/1 is defined" do
+      Process.register(self(), :dstar_plug_stream_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_stream_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      task =
+        Task.async(fn ->
+          PagePlug.call(conn(:post, "/keyed"), PagePlug.init({:stream, KeyedStreamPage}))
+        end)
+
+      assert_receive {:keyed_connected, stream_pid}, 1_000
+      send(stream_pid, :halt_now)
+
+      conn = Task.await(task, 2_000)
+      assert conn.state == :chunked
     end
   end
 

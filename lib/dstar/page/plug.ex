@@ -116,6 +116,9 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             Dstar.SSE.start(conn)
           end
 
+        # TODO: consider a debug_errors relay (like the event action) for
+        # handle_connect/handle_info crashes — today a crash means a silent
+        # dead stream in the browser.
         conn = page.handle_connect(conn, conn.params)
         loop(conn, page, page.__dstar__(:idle_check))
       else
@@ -127,6 +130,11 @@ if Code.ensure_loaded?(Phoenix.Controller) do
 
     defp loop(conn, page, idle_check) do
       receive do
+        # Plug adapters notify the conn owner when the response is sent;
+        # this is internal plumbing, never a page message.
+        {:plug_conn, :sent} ->
+          loop(conn, page, idle_check)
+
         msg ->
           case dispatch_info(page, msg, conn) do
             {:halt, conn} -> conn
