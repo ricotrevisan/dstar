@@ -11,6 +11,7 @@
 
 Other libraries give you SSE primitives and leave the rest to you. Dstar gives you the primitives **and** the utilities you'd end up building yourself:
 
+- **Pages** — `use Dstar.Page` puts render, event handlers, streaming callbacks, and components in one module. One router line wires it.
 - **Event dispatch** — One route, unlimited handlers. `Dstar.Plugs.Dispatch` routes events to handler modules by convention, so you never hand-wire a route per action.
 - **URL generation** — `Dstar.post/2`, `Dstar.get/2`, `Dstar.delete/2` generate `@post(...)` expressions with correct paths. No hand-written URLs in templates.
 - **CSRF handling** — Works out of the box with Datastar's header-based tokens. `Dstar.Plugs.RenameCsrfParam` bridges SSE and form-based routes so `Plug.CSRFProtection` just works.
@@ -18,7 +19,7 @@ Other libraries give you SSE primitives and leave the rest to you. Dstar gives y
 - **Console logging** — `Dstar.console_log/2` sends log/warn/error messages straight to the browser DevTools. Debug from the server, read in the browser.
 - **Phoenix.HTML support** — `patch_elements` accepts both raw strings and `Phoenix.HTML.safe()` tuples, so HEEx template output works without conversion.
 
-Under the hood, it's ~700 lines of code with no GenServers, no behaviours, and no macros. Just functions that take a `Plug.Conn` and return a `Plug.Conn`. The one optional process — `StreamRegistry` — is opt-in only if you need stream deduplication.
+The functional core is still a small bag of functions with no processes. The page layer on top is one behaviour, one plug, and two router macros — all optional, all readable. The one optional process — `StreamRegistry` — is opt-in only if you need stream deduplication.
 
 Drop it into any Plug-based app: Phoenix controllers, plain Plug, Bandit. If you have a `%Plug.Conn{}`, you can use Dstar.
 
@@ -29,10 +30,12 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "~> 0.0.10"}
+    {:dstar, "~> 0.1.0"}
   ]
 end
 ```
+
+Pages need `{:phoenix, "~> 1.7"}` and `{:phoenix_live_view, "~> 1.0"}` in your app (any Phoenix app already has them). The functional core needs neither.
 
 Then add the Datastar client script to your root layout's `<head>`:
 
@@ -44,139 +47,131 @@ That's it. No generators, no config, no application callback.
 
 ## Quick Start
 
-A counter with increment, decrement, and reset — enough to show every primitive.
-
-### 1. Routes
+A page is **one module and one router line**.
 
 ```elixir
 # router.ex
-
-# Page render — normal Phoenix controller
-get "/counter", CounterController, :show
-
-# All Datastar events — single dispatch route
-post "/ds/:module/:event", Dstar.Plugs.Dispatch,
-  modules: [MyAppWeb.CounterEvents]
+import Dstar.Router
+dstar "/counter", MyAppWeb.CounterPage
 ```
 
-Two routes. The `GET` renders HTML. The `POST` dispatches Datastar events
-to an allowlisted handler module. That's the entire wiring.
-
-### 2. Controller — renders the page
-
 ```elixir
-defmodule MyAppWeb.CounterController do
-  use MyAppWeb, :controller
+defmodule MyAppWeb.CounterPage do
+  use Dstar.Page
 
-  def show(conn, _params) do
-    render(conn, :counter)
+  # GET — load data, assign, render
+  def mount(conn, _params) do
+    assign(conn, count: 0, page_title: "Counter")
   end
-end
-```
 
-No SSE logic here. This is a plain Phoenix controller that serves HTML.
+  def render(assigns) do
+    ~H"""
+    <div data-signals:count={@count}>
+      <h1 data-text="$count"></h1>
+      <span id="history">—</span>
+      <button data-on:click={event("increment")}>+1</button>
+      <button data-on:click={event("reset")}>Reset</button>
+    </div>
+    """
+  end
 
-### 3. Event handler — reacts to Datastar actions
-
-```elixir
-defmodule MyAppWeb.CounterEvents do
+  # POST /counter/_event/<name> — SSE already started for you
   def handle_event(conn, "increment", signals) do
     count = (signals["count"] || 0) + 1
 
     conn
-    |> Dstar.start()
-    |> Dstar.patch_signals(%{count: count})
-    |> Dstar.patch_elements(
-      ~s(<span id="history">Last: +1 → #{count}</span>),
-      selector: "#history"
-    )
-  end
-
-  def handle_event(conn, "decrement", signals) do
-    count = max((signals["count"] || 0) - 1, 0)
-
-    conn
-    |> Dstar.start()
-    |> Dstar.patch_signals(%{count: count})
-    |> Dstar.patch_elements(
-      ~s(<span id="history">Last: -1 → #{count}</span>),
-      selector: "#history"
-    )
+    |> patch_signals(%{count: count})
+    |> patch(&history/1, last: "+1 → #{count}")
   end
 
   def handle_event(conn, "reset", _signals) do
     conn
-    |> Dstar.start()
-    |> Dstar.patch_signals(%{count: 0})
-    |> Dstar.patch_elements(
-      ~s(<span id="history">Reset</span>),
-      selector: "#history"
-    )
-    |> Dstar.execute_script("""
-    document.getElementById('history').animate(
-      [{opacity: 0}, {opacity: 1}],
-      {duration: 300}
-    )
-    """)
-    |> Dstar.console_log("Counter reset")
+    |> patch_signals(%{count: 0})
+    |> patch(&history/1, last: "Reset")
+    |> console_log("Counter reset")
+  end
+
+  # Colocated components — used by render/1 and by patches alike
+  defp history(assigns) do
+    ~H"""
+    <span id="history">Last: {@last}</span>
+    """
   end
 end
 ```
 
-Pattern-match on event name. Read signals, do work, pipe SSE patches back.
-`increment` and `decrement` update both the reactive signal *and* a DOM element.
-`reset` also runs a JS animation and logs to the browser console — all from
-the same pipeline.
+That's the whole page. Notice what's *absent*:
 
-### 4. Template
+- No separate controller, HTML, or components module — one file.
+- No `handler={...}` / `prefix={...}` threading: `event("increment")`
+  resolves its URL in the browser (`location.pathname + '/_event/...'`),
+  so path params like `/:workspace_slug` need no server-side plumbing.
+- No `Dstar.start()` — event POSTs are SSE by definition, so the
+  library starts the stream before calling you.
+- No allowlist registration — the `dstar` route *is* the allowlist.
+
+### Streaming
+
+Declare how to subscribe; the library owns the receive loop:
+
+```elixir
+  # In the same page module:
+  def handle_connect(conn, _params) do
+    MyAppWeb.Endpoint.subscribe("ticker")
+    conn
+  end
+
+  def handle_info(%Phoenix.Socket.Broadcast{payload: p}, conn) do
+    patch_signals(conn, %{tick: p.count})
+  end
+```
 
 ```heex
-<%# counter.html.heex %>
-
-<div data-signals:count="0">
-  <h1 data-text="$count">0</h1>
-
-  <span id="history">—</span>
-
-  <button data-on:click={Dstar.post(MyAppWeb.CounterEvents, "increment")}>
-    +1
-  </button>
-
-  <button data-on:click={Dstar.post(MyAppWeb.CounterEvents, "decrement")}>
-    −1
-  </button>
-
-  <button data-on:click={Dstar.post(MyAppWeb.CounterEvents, "reset")}>
-    Reset
-  </button>
+<div data-init={connect()} data-on:online__window={connect()}>
+  <span data-text="$tick"></span>
 </div>
 ```
 
-`Dstar.post/2` pairs with `Dstar.Plugs.Dispatch` — it generates the
-`@post(...)` expression with the correct path so you never hand-write
-URLs. CSRF is handled separately via the standard Phoenix meta tag
-(see [CSRF Protection Setup](#csrf-protection-setup)). One dispatch
-route, as many handlers as you want.
+The loop checks connection liveness every 30s (tune with
+`use Dstar.Page, idle_check: 10_000`), survives stray messages, and
+cleans up when the client disconnects. Add a `stream_key/1` callback to
+enable per-tab stream deduplication via `Dstar.Utility.StreamRegistry`.
 
-### What just happened?
+### Shared components
 
-| Layer | Concern |
-| --- | --- |
-| **Router** | `GET` → controller, `POST /ds/*` → dispatch |
-| **Controller** | Renders HTML. No SSE awareness. |
-| **Handler** | Pure `handle_event/3` functions. Reads signals, pipes SSE responses. |
-| **Template** | Standard HEEx + Datastar attributes. `Dstar.post/2` wires the buttons. |
+UI used across many pages — with its event handlers in the same module:
 
-Three Dstar primitives covered:
+```elixir
+defmodule MyAppWeb.DetailDrawer do
+  use Dstar.Component
 
-- **`patch_signals`** — update reactive client state
-- **`patch_elements`** — patch DOM elements by CSS selector
-- **`execute_script`** / **`console_log`** — run JS on the client
+  def drawer(assigns) do
+    ~H"""
+    <div id="detail-drawer">
+      <input data-on:change={event("change_title:#{@item.id}")} value={@item.title} />
+    </div>
+    """
+  end
 
-No GenServers. No processes. No macros. Just functions that format SSE events
-and send them over a `Plug.Conn`.
+  def handle_event(conn, "change_title:" <> id, signals) do
+    # update the record, then patch
+    conn |> start() |> patch_signals(%{saved: true})
+  end
+end
+```
 
-## Core API
+```elixir
+# router.ex — one line for ALL components:
+dstar_components "/ds", [MyAppWeb.DetailDrawer]
+```
+
+Pages embed `<MyAppWeb.DetailDrawer.drawer item={@item} />` and need zero
+`handle_event` clauses for it. If your app mounts routes under a prefix,
+declare it once in the root layout: `<body data-ds-prefix={...}>`.
+
+## The functional core
+
+*Everything above is built from these functions. Use them directly in plain controllers, custom plugs, or anywhere you have a `%Plug.Conn{}` — pages are optional sugar, the core is the contract.*
 
 Everything goes through the `Dstar` convenience module, which delegates to lower-level modules.
 
@@ -343,6 +338,8 @@ conn |> Dstar.console_log("Warning!", level: :warn)
 - `:level` — `:log` (default), `:warn`, `:error`, `:info`, `:debug`
 
 ## Real-time Streaming
+
+With `Dstar.Page`, declare subscriptions in `handle_connect/2` and implement `handle_info/2` — the library owns the loop (see Quick Start). The hand-rolled loop below remains fully supported for plain controllers:
 
 For real-time features (chat, tickers, notifications), use PubSub and a receive loop in your controller. The library doesn't need to own this — PubSub is the real-time primitive.
 
@@ -597,6 +594,11 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 
 | Module | Functions |
 |--------|-----------|
+| `Dstar.Page` | behaviour + `use` macro: `mount/2`, `render/1`, `handle_event/3`, `handle_connect/2`, `handle_info/2`, `stream_key/1` |
+| `Dstar.Page.Plug` | request driver: handles page, event, and stream actions |
+| `Dstar.Component` | shared UI with colocated event handlers |
+| `Dstar.Router` | `dstar/2` (page routes), `dstar_components/2` (dispatch route) |
+| `Dstar.Test` | `sse_events/1`, `patched_signals/1`, `assert_patched_signals/2`, `assert_patched_element/2` |
 | `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2` |
 | `Dstar.Signals` | `read/1`, `patch/2,3`, `patch_raw/2,3`, `format_patch/1,2`, `remove_signals/2,3`, `format_remove/1,2` |
 | `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `format_patch/1,2` |

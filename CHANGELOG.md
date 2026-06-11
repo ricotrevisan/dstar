@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.0
+
+The unified page module release. A Datastar page is now one module and
+one router line.
+
+### Added
+
+- `Dstar.Page` — `use` it for one-module pages: `mount/2`, `render/1`,
+  `handle_event/3`, `handle_connect/2`, `handle_info/2`, `stream_key/1`.
+- `Dstar.Page.Plug` — drives all page requests; owns the SSE receive
+  loop with idle checks and stray-message tolerance.
+- `Dstar.Component` — shared UI with colocated event handlers; `event/2`
+  targets the dispatch URL with a client-side `data-ds-prefix` base.
+- `Dstar.Router` — `dstar/2` (page routes) and `dstar_components/2`
+  (dispatch route) macros.
+- `Dstar.Page.Helpers` — `event/1,2`, `connect/0,1`, `patch/3,4`.
+- `Dstar.Page.Assigns` — `assign`/`assign_new`/`update` working on both
+  conns and component assigns.
+- `Dstar.Test` — `sse_events/1`, `patched_signals/1`,
+  `assert_patched_signals/2`, `assert_patched_element/2`.
+- Optional deps: `phoenix ~> 1.7`, `phoenix_live_view ~> 1.0`. The
+  functional core still needs only `plug` + `jason`.
+
+### Changed
+
+- Docs restructured around pages; the original API is now "the
+  functional core". Nothing breaks: all 0.0.x code works unchanged.
+
 ## 0.0.10 — 2026-04-24
 
 ### Fixed

@@ -1,5 +1,72 @@
 # Dstar Usage Rules
 
+## Pages first
+
+Prefer `use Dstar.Page` + `dstar/2` for new pages. Use `Dstar.Component` +
+`dstar_components/2` for shared UI with colocated event handlers. Reach for
+the functional core (`Dstar.*` on a conn) in plain controllers or custom plugs.
+
+### Canonical example — full counter page
+
+```elixir
+# router.ex
+import Dstar.Router
+dstar "/counter", MyAppWeb.CounterPage
+```
+
+```elixir
+defmodule MyAppWeb.CounterPage do
+  use Dstar.Page
+
+  # GET — load data, assign, render
+  def mount(conn, _params) do
+    assign(conn, count: 0, page_title: "Counter")
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div data-signals:count={@count}>
+      <h1 data-text="$count"></h1>
+      <span id="history">—</span>
+      <button data-on:click={event("increment")}>+1</button>
+      <button data-on:click={event("reset")}>Reset</button>
+    </div>
+    """
+  end
+
+  # POST /counter/_event/<name> — SSE already started for you
+  def handle_event(conn, "increment", signals) do
+    count = (signals["count"] || 0) + 1
+
+    conn
+    |> patch_signals(%{count: count})
+    |> patch(&history/1, last: "+1 → #{count}")
+  end
+
+  def handle_event(conn, "reset", _signals) do
+    conn
+    |> patch_signals(%{count: 0})
+    |> patch(&history/1, last: "Reset")
+    |> console_log("Counter reset")
+  end
+
+  # Colocated components — used by render/1 and by patches alike
+  defp history(assigns) do
+    ~H"""
+    <span id="history">Last: {@last}</span>
+    """
+  end
+end
+```
+
+Key rules:
+- One module per page — no separate controller, HTML module, or template file.
+- `event("name")` generates the `@post(...)` expression client-side; no path
+  threading needed for path params.
+- The library calls `Dstar.start/1` before `handle_event/3` — do not call it
+  again inside the handler.
+- `dstar "/path", PageModule` is the allowlist. No separate allowlist entry needed.
+
 ## What Dstar Is
 
 Dstar is a **minimalist SSE library** (~700 lines) providing pure functions over `Plug.Conn` to format and send Server-Sent Events for Datastar client-side framework. Two deps: `plug` and `jason`.
