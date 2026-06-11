@@ -42,6 +42,9 @@ if Code.ensure_loaded?(Phoenix.Controller) do
           conn
         end
 
+      # Skip render if mount halted OR staged/sent any response. A :set conn
+      # (resp/3 without send_resp) must be honored, not overwritten: Plug
+      # adapters auto-send staged responses (see Plug.Cowboy.Handler.maybe_send/2).
       if conn.halted or conn.state != :unset do
         conn
       else

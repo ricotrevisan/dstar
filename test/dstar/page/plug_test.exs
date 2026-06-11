@@ -53,6 +53,18 @@ defmodule Dstar.Page.PlugTest do
     def render(assigns), do: ~H'<div id="bare">bare</div>'
   end
 
+  defmodule HaltedPage do
+    use Dstar.Page
+
+    def mount(conn, _params) do
+      conn
+      |> Plug.Conn.send_resp(401, "unauthorized")
+      |> Plug.Conn.halt()
+    end
+
+    def render(assigns), do: ~H'<div id="never-halted">never rendered</div>'
+  end
+
   describe "page action (GET)" do
     test "mounts and renders HTML 200" do
       conn = conn(:get, "/counter?start=5")
@@ -76,6 +88,13 @@ defmodule Dstar.Page.PlugTest do
     test "skips render when mount already sent a response" do
       conn = PagePlug.call(conn(:get, "/r"), PagePlug.init({:page, RedirectPage}))
       assert conn.status == 302
+      refute conn.resp_body =~ "never rendered"
+    end
+
+    test "skips render when mount halts after sending (auth pattern)" do
+      conn = PagePlug.call(conn(:get, "/h"), PagePlug.init({:page, HaltedPage}))
+      assert conn.status == 401
+      assert conn.halted
       refute conn.resp_body =~ "never rendered"
     end
   end
