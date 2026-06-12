@@ -86,7 +86,10 @@ defmodule Dstar.Page.Helpers do
   """
   def patch(conn, component, assigns, opts \\ [])
       when is_function(component, 1) and (is_list(assigns) or is_map(assigns)) do
-    html = component.(Map.new(assigns))
+    # Direct function-component calls bypass the HEEx engine, which is what
+    # normally adds :__changed__; without it, any assign/3 inside raises.
+    assigns = assigns |> Map.new() |> Map.put_new(:__changed__, nil)
+    html = component.(assigns)
     Dstar.Elements.patch(conn, html, opts)
   end
 end

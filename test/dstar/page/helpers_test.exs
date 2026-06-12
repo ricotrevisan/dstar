@@ -1,3 +1,15 @@
+defmodule AssigningComponent do
+  use Phoenix.Component
+
+  def banner(assigns) do
+    assigns = assign(assigns, :label, "n=#{assigns.n}")
+
+    ~H"""
+    <div id="banner">{@label}</div>
+    """
+  end
+end
+
 defmodule Dstar.Page.HelpersTest do
   use ExUnit.Case, async: true
   import Plug.Test
@@ -82,6 +94,15 @@ defmodule Dstar.Page.HelpersTest do
         |> patch(&history/1, %{value: 9})
 
       assert conn.resp_body =~ "Last: 9"
+    end
+
+    test "renders components that call assign/3 internally" do
+      conn =
+        conn(:post, "/")
+        |> Dstar.SSE.start()
+        |> patch(&AssigningComponent.banner/1, n: 7)
+
+      assert conn.resp_body =~ "n=7"
     end
   end
 end
