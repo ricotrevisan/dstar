@@ -31,6 +31,8 @@ defmodule Dstar.Plugs.Dispatch do
   """
 
   @behaviour Plug
+
+  require Logger
   import Plug.Conn
 
   alias Dstar.{Actions, Signals}
@@ -58,7 +60,18 @@ defmodule Dstar.Plugs.Dispatch do
     case Map.fetch(lookup, module_param) do
       {:ok, module} ->
         signals = Signals.read(conn)
-        module.handle_event(conn, event, signals)
+
+        try do
+          module.handle_event(conn, event, signals)
+        rescue
+          exception ->
+            Logger.error(
+              "Dstar.Plugs.Dispatch: #{inspect(module)}.handle_event(#{inspect(event)}) raised:\n" <>
+                Exception.format(:error, exception, __STACKTRACE__)
+            )
+
+            reraise exception, __STACKTRACE__
+        end
 
       :error ->
         conn

@@ -116,10 +116,15 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             Dstar.SSE.start(conn)
           end
 
-        # TODO: consider a debug_errors relay (like the event action) for
-        # handle_connect/handle_info crashes — today a crash means a silent
-        # dead stream in the browser.
-        conn = page.handle_connect(conn, conn.params)
+        conn =
+          try do
+            page.handle_connect(conn, conn.params)
+          rescue
+            exception ->
+              log_crash(page, :handle_connect, exception, __STACKTRACE__)
+              reraise exception, __STACKTRACE__
+          end
+
         loop(conn, page, page.__dstar__(:idle_check))
       else
         conn
@@ -172,11 +177,22 @@ if Code.ensure_loaded?(Phoenix.Controller) do
         if exception.module == page and exception.function == :handle_info and
              exception.arity == 2 do
           Logger.warning("#{inspect(page)} received unhandled message: #{inspect(msg)}")
-
           conn
         else
+          log_crash(page, :handle_info, exception, __STACKTRACE__)
           reraise exception, __STACKTRACE__
         end
+
+      exception ->
+        log_crash(page, :handle_info, exception, __STACKTRACE__)
+        reraise exception, __STACKTRACE__
+    end
+
+    defp log_crash(page, callback, exception, stacktrace) do
+      Logger.error(
+        "Dstar.Page.Plug: #{inspect(page)}.#{callback} raised:\n" <>
+          Exception.format(:error, exception, stacktrace)
+      )
     end
   end
 end

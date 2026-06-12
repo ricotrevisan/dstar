@@ -234,5 +234,32 @@ defmodule Dstar.Plugs.DispatchTest do
 
       assert result.state == :chunked
     end
+
+    test "logs and reraises handler crashes" do
+      import ExUnit.CaptureLog
+
+      defmodule RaisingHandler do
+        def handle_event(_conn, "boom", _signals), do: raise("kaboom")
+      end
+
+      opts = Dispatch.init(modules: [RaisingHandler])
+      module_name = Dstar.Actions.encode_module(RaisingHandler)
+
+      conn =
+        conn(:post, "/ds/#{module_name}/boom")
+        |> Map.put(:path_params, %{"module" => module_name, "event" => "boom"})
+        |> Map.put(:body_params, %{})
+
+      log =
+        capture_log(fn ->
+          assert_raise RuntimeError, "kaboom", fn ->
+            Dispatch.call(conn, opts)
+          end
+        end)
+
+      assert log =~ "Dstar.Plugs.Dispatch:"
+      assert log =~ "RaisingHandler"
+      assert log =~ "kaboom"
+    end
   end
 end
