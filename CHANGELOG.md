@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.0-alpha.3 — 2026-06-12
+
+### Fixed
+
+- `Dstar.Page.Helpers.patch/4` injects `:__changed__` so rendered
+  components may call `assign/3` (direct calls bypass the HEEx engine,
+  which normally adds it).
+- `Dstar.Plugs.Dispatch` and `Dstar.Page.Plug` now log crashes from
+  `handle_event`/`handle_connect`/`handle_info` before reraising —
+  previously a stream callback crash was a silent dead stream.
+
+### Added
+
+- `connect(include_search: true)` appends `location.search` to the
+  stream-connect URL for pages whose render depends on query params.
+
 ## 0.1.0-alpha.2 — 2026-06-11
 
 ### Added
