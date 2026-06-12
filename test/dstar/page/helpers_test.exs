@@ -59,6 +59,11 @@ defmodule Dstar.Page.HelpersTest do
       assert connect(opts: "{retryMaxCount: 3}") ==
                "@post(location.pathname, {retryMaxCount: 3})"
     end
+
+    test "include_search appends location.search" do
+      assert connect(include_search: true) ==
+               "@post(location.pathname + location.search, {retryMaxCount: Infinity})"
+    end
   end
 
   describe "patch/3,4" do

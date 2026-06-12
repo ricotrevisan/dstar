@@ -64,15 +64,28 @@ defmodule Dstar.Page.Helpers do
       connect()
       #=> "@post(location.pathname, {retryMaxCount: Infinity})"
 
+      connect(include_search: true)
+      #=> "@post(location.pathname + location.search, {retryMaxCount: Infinity})"
+
   ## Options
 
   - `:opts` — override the options object (default `"{retryMaxCount: Infinity}"`)
+  - `:include_search` — append `location.search` so query params reach `handle_connect`
+    (pages whose render depends on them, e.g. `?step=`).
 
   Always emits `@post` — Dstar streams connect over POST.
   """
   def connect(opts \\ []) when is_list(opts) do
     extra = Keyword.get(opts, :opts, "{retryMaxCount: Infinity}")
-    "@post(location.pathname, #{extra})"
+
+    url =
+      if Keyword.get(opts, :include_search, false) do
+        "location.pathname + location.search"
+      else
+        "location.pathname"
+      end
+
+    "@post(#{url}, #{extra})"
   end
 
   @doc """
