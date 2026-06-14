@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0-alpha.3 — 2026-06-12
+## 0.1.0 — 2026-06-14
 
 ### Fixed
 
@@ -15,6 +15,17 @@
 
 - `connect(include_search: true)` appends `location.search` to the
   stream-connect URL for pages whose render depends on query params.
+
+### Documentation
+
+- Corrected the CSRF guidance across the usage rules, the `use-dstar`
+  skill, and the Phoenix-Datastar migration guide to match the README and
+  `RenameCsrfParam` correction: Datastar has no built-in CSRF support, so
+  the token must travel as a non-prefixed `csrf` signal rather than the
+  previously-documented (and nonexistent) `x-csrf-token` meta-tag path.
+- Modernized the `datastar-attributes` handler examples to the conn-based
+  API (`handle_event(conn, event, signals)`, `Dstar.start/1`,
+  `patch_signals`, `patch_elements(html, selector:, mode:)`).
 
 ## 0.1.0-alpha.2 — 2026-06-11
 
