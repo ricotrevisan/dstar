@@ -229,28 +229,7 @@ end
 
 ## CSRF Setup
 
-### Header-based (Recommended)
-
-**Root Layout (root.html.heex):**
-```heex
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="csrf-token" content={get_csrf_token()} />
-  <script src="/assets/datastar.js"></script>
-</head>
-<body>
-  <%= @inner_content %>
-</body>
-</html>
-```
-
-Dstar's verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) read the standard Phoenix CSRF meta tag and include it as an `x-csrf-token` header.
-
-They do **not** read CSRF from Datastar signals, so normal signal round-trips do not rewrite the helper's CSRF header.
-
-### Form-compatible
+Datastar has **no built-in CSRF support** — it does not read Phoenix's `<meta name="csrf-token">` tag and never sets an `x-csrf-token` header. The token must travel as a signal.
 
 **Router (plug goes before `:protect_from_forgery`):**
 ```elixir
@@ -264,12 +243,23 @@ pipeline :browser do
 end
 ```
 
-**Layout:**
+**Root Layout (root.html.heex):**
 ```heex
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <script src="/assets/datastar.js"></script>
+</head>
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
+  <%= @inner_content %>
+</body>
+</html>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar will include it in each request body. `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection`.
+Because `csrf` is not `_`-prefixed, Datastar will include it in each request body. `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection`. This one setup covers page events, stream connects, component events, and the verb helpers.
+
+For Datastar-only routes you can instead use a pipeline without `:protect_from_forgery` — simpler, but those endpoints then rely on your session/auth checks alone.
 
 ## Multiple Patches in One Response
 

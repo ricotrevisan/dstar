@@ -14,7 +14,7 @@ Other libraries give you SSE primitives and leave the rest to you. Dstar gives y
 - **Pages** — `use Dstar.Page` puts render, event handlers, streaming callbacks, and components in one module. One router line wires it.
 - **Event dispatch** — One route, unlimited handlers. `Dstar.Plugs.Dispatch` routes events to handler modules by convention, so you never hand-wire a route per action.
 - **URL generation** — `Dstar.post/2`, `Dstar.get/2`, `Dstar.delete/2` generate `@post(...)` expressions with correct paths. No hand-written URLs in templates.
-- **CSRF handling** — Works out of the box with Datastar's header-based tokens. `Dstar.Plugs.RenameCsrfParam` bridges SSE and form-based routes so `Plug.CSRFProtection` just works.
+- **CSRF handling** — Datastar has no built-in CSRF support, so the token travels as a signal. `Dstar.Plugs.RenameCsrfParam` maps it to where `Plug.CSRFProtection` looks — one plug, one `<body>` attribute, and forgery protection just works.
 - **Stream deduplication** — `Dstar.Utility.StreamRegistry` kills zombie SSE processes when users navigate between pages. One process per tab, always.
 - **Console logging** — `Dstar.console_log/2` sends log/warn/error messages straight to the browser DevTools. Debug from the server, read in the browser.
 - **Phoenix.HTML support** — `patch_elements` accepts both raw strings and `Phoenix.HTML.safe()` tuples, so HEEx template output works without conversion.

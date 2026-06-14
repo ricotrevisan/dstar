@@ -125,15 +125,9 @@ All functions in `Dstar` module:
 
 ## CSRF Setup
 
-**Approach 1: Header-based (recommended)**
-
-```heex
-<body data-signals:_csrf-token={"'#{get_csrf_token()}'"}>
-```
-
-The `_` prefix makes it client-only; sent as `x-csrf-token` header. Dstar's verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) auto-include this.
-
-**Approach 2: Form-compat** (for mixed SSE + regular form routes)
+Datastar has **no built-in CSRF support** — it does not read Phoenix's
+`<meta name="csrf-token">` tag and never sets an `x-csrf-token` header.
+The token must travel as a signal.
 
 ```elixir
 # In your router pipeline, BEFORE :protect_from_forgery:
@@ -145,7 +139,9 @@ plug :protect_from_forgery
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-The plug safely no-ops when the param isn't present, so it's fine to use globally.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request body. The plug copies it to `_csrf_token`, where `Plug.CSRFProtection` looks. This one setup covers page events, stream connects, component events, and the verb helpers. The plug safely no-ops when the param isn't present, so it's fine to use globally.
+
+Alternatively, pipe Datastar-only routes through a pipeline without `:protect_from_forgery` — simpler, but those endpoints then rely on your session/auth checks alone.
 
 ## Dynamic Dispatch
 

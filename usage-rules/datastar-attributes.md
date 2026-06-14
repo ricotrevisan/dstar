@@ -18,8 +18,8 @@ Declare reactive state that syncs between client and server.
 </div>
 
 <!-- Client-only signal (underscore prefix, not sent to server) -->
-<div data-signals:_csrf_token="'abc123'">
-  <!-- Common for headers, UI state -->
+<div data-signals:_loading="false">
+  <!-- Common for UI state: loading flags, open/closed toggles -->
 </div>
 ```
 
@@ -301,19 +301,15 @@ Respond to DOM events.
 ```
 
 ```elixir
-# Elixir handler
+# Elixir handler (plain module — registered with Dstar.Plugs.Dispatch)
 defmodule MyApp.SearchHandler do
-  use Dstar.Handler
-  
-  def handle_event("search", %{"search" => query}, socket) do
+  def handle_event(conn, "search", %{"search" => query}) do
     results = MyApp.Search.query(query)
-    
-    socket
-    |> Dstar.patch_elements("#results", """
-      <%= for result <- @results do %>
-        <div><%= result.title %></div>
-      <% end %>
-    """, results: results)
+    html = Phoenix.Template.render_to_string(MyAppWeb.SearchHTML, "results", results: results)
+
+    conn
+    |> Dstar.start()
+    |> Dstar.patch_elements(html, selector: "#results")
   end
 end
 ```
@@ -326,8 +322,9 @@ Run code when element mounts.
 
 ```heex
 <!-- Establish persistent SSE stream -->
+<!-- CSRF travels as a non-prefixed `csrf` signal (see CSRF setup in usage-rules.md) -->
 <div 
-  data-signals:_csrf_token={"'#{Plug.CSRFProtection.get_csrf_token()}'"}
+  data-signals:csrf={"'#{Plug.CSRFProtection.get_csrf_token()}'"}
   data-init={~s|@post('#{~p"/stream"}', {retryMaxCount: Infinity})|}>
   App content
 </div>
@@ -385,8 +382,8 @@ Render lists from array signals.
 
 ```elixir
 # Elixir: update todos from server
-socket
-|> Dstar.merge_signals(%{
+conn
+|> Dstar.patch_signals(%{
   todos: [
     %{id: 1, title: "Buy milk", done: false},
     %{id: 2, title: "Walk dog", done: true}
@@ -451,17 +448,15 @@ Trigger actions when element enters viewport.
 
 ```elixir
 # Elixir handler
-def handle_event("load_more", _params, socket) do
-  page = socket.assigns.signals["page"] + 1
+def handle_event(conn, "load_more", signals) do
+  page = (signals["page"] || 0) + 1
   items = MyApp.Items.get_page(page)
-  
-  socket
-  |> Dstar.merge_signals(%{page: page})
-  |> Dstar.patch_elements("#items", """
-    <%= for item <- @items do %>
-      <div><%= item.name %></div>
-    <% end %>
-  """, items: items, merge: :append)
+  html = Phoenix.Template.render_to_string(MyAppWeb.ItemHTML, "items", items: items)
+
+  conn
+  |> Dstar.start()
+  |> Dstar.patch_signals(%{page: page})
+  |> Dstar.patch_elements(html, selector: "#items", mode: :append)
 end
 ```
 
@@ -537,12 +532,16 @@ Named view transitions for smooth UI updates.
 
 ```elixir
 # Elixir: enable view transitions on patch
-socket
-|> Dstar.patch_elements("#content", """
+conn
+|> Dstar.patch_elements(
+  """
   <div data-view-transition="hero-image">
     <img src="new-hero.jpg">
   </div>
-""", use_view_transitions: true)
+  """,
+  selector: "#content",
+  use_view_transitions: true
+)
 ```
 
 **Use case:** Smooth morphing between states (image galleries, page transitions).
@@ -683,7 +682,6 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 
 ### Custom Headers
 ```heex
-<!-- Dstar automatically includes CSRF token for Phoenix -->
 <button 
   data-on:click={~s|@post('/api/action', {
     headers: {
@@ -695,7 +693,7 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 </button>
 ```
 
-**Note:** Dstar verb helpers (`Dstar.post/3`, etc.) automatically handle CSRF tokens for Phoenix apps.
+**Note:** Datastar never sets an `x-csrf-token` header. For routes behind `Plug.CSRFProtection`, expose the token as a non-prefixed `csrf` signal and add `Dstar.Plugs.RenameCsrfParam` to your pipeline (see CSRF setup in usage-rules.md).
 
 ### Common Options
 - `retryMaxCount: Infinity` — For persistent streams
@@ -749,8 +747,9 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 
 ### Persistent SSE Connection
 ```heex
+<%!-- CSRF travels as a non-prefixed `csrf` signal (see CSRF setup in usage-rules.md) --%>
 <div 
-  data-signals:_csrf_token={"'#{Plug.CSRFProtection.get_csrf_token()}'"}
+  data-signals:csrf={"'#{Plug.CSRFProtection.get_csrf_token()}'"}
   data-init={~s|@post('#{~p"/stream"}', {retryMaxCount: Infinity})|}>
   
   <div id="live-updates">
@@ -763,8 +762,8 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 
 ## Tips for Elixir/Phoenix Developers
 
-1. **Signal Naming:** Use underscore prefix (`_loading`, `_csrf_token`) for client-only signals
-2. **CSRF:** Dstar automatically includes CSRF tokens; for custom fetch add `data-signals:_csrf_token`
+1. **Signal Naming:** Use underscore prefix (`_loading`, `_open`) for client-only signals
+2. **CSRF:** Datastar has no built-in CSRF handling — expose the token as a **non-prefixed** `csrf` signal and add `Dstar.Plugs.RenameCsrfParam` before `:protect_from_forgery`
 3. **HEEx Escaping:** Wrap JS strings in HEEx interpolation: `data-signals:id={"'#{@id}'"}`
 4. **Indicators:** Always use client-only signals for loading states
 5. **Debounce:** Default to 300ms for search, 500ms for expensive operations
@@ -776,5 +775,5 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 ## Resources
 
 - **Datastar Docs:** https://data-star.dev
-- **Dstar Library:** https://github.com/phaleth/dstar
+- **Dstar Library:** https://github.com/ricotrevisan/dstar
 - **Version:** Datastar v1.0.0

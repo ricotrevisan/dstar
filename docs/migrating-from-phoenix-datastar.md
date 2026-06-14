@@ -452,39 +452,26 @@ end
 
 ## Step 6: Update CSRF Setup
 
-### Header-based approach (recommended)
-
-```heex
-<%!-- Before — Phoenix already exposes this in the layout head --%>
-<meta name="csrf-token" content={get_csrf_token()} />
-
-<%!-- After — keep using the standard Phoenix meta tag --%>
-<meta name="csrf-token" content={get_csrf_token()} />
-```
-
-When using Dstar's verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`), the CSRF header is automatically included in the generated expressions by reading the `<meta name="csrf-token">` tag.
-
-This means Datastar's normal signal round-tripping does **not** rewrite the CSRF header used by `Dstar.Actions`.
-
-If you write `@post(...)` manually, add the header yourself:
-
-```heex
-<button data-on:click="@post('/counter/increment', {headers: {'x-csrf-token': document.querySelector('meta[name=csrf-token]').content}})">
-  +
-</button>
-```
-
-### Form + SSE approach
+Datastar has **no built-in CSRF support** — it does not read Phoenix's `<meta name="csrf-token">` tag and never sets an `x-csrf-token` header. The token must travel as a signal. The Phoenix meta tag can stay in your layout (other tooling may use it), but Datastar ignores it.
 
 ```elixir
 # Before — router.ex
 plug Dstar.Plugs.RenameCsrfParam
 
-# After — same plug, same setup
+# After — same plug, same setup (before :protect_from_forgery)
 plug Dstar.Plugs.RenameCsrfParam
+plug :protect_from_forgery
 ```
 
-If you expose the token as a non-prefixed `csrf` signal for form compatibility, Datastar will include it in every request body. That's expected, and `Dstar.Plugs.RenameCsrfParam` exists specifically to copy that value into `_csrf_token` for `Plug.CSRFProtection`.
+Expose the token as a **non-prefixed** signal in your root layout:
+
+```heex
+<body data-signals:csrf={"'#{get_csrf_token()}'"}>
+```
+
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request body. `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection`. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed.
+
+Alternatively, pipe Datastar-only routes through a pipeline without `:protect_from_forgery` — simpler, but those endpoints then rely on your session/auth checks alone.
 
 ## Step 7: Update Script Execution & Redirects
 
