@@ -120,10 +120,14 @@ the setter fires with the signal's current value the moment the element binds. I
 it isn't idempotent (`if html === current, return`) and a no-op before the managed
 DOM exists, it re-applies content over freshly-loaded state and can clobber it.
 
-❌ **Assuming `Dstar.patch_signals` nests dotted keys.** It JSON-encodes the map
-as-is. A signal bound as `data-bind="foo.bar"` must be set with the matching shape
-— pick one representation (`%{"foo.bar" => v}`) and use it consistently across
-call sites (a nested map like `%{foo: %{bar: v}}` would emit `{"foo":{"bar":…}}` and never match a signal bound as `foo.bar`).
+❌ **Assuming `Dstar.patch_signals` nests dotted string keys.** It sends your map
+as JSON unchanged, and the client merges that JSON structurally — it does not
+split a dotted string key into a nested path. Your map's shape must mirror the
+signal's path: a signal bound as `data-bind="foo.bar"` lives at the nested path
+`foo.bar` and must be patched with `%{foo: %{bar: v}}`; `%{"foo.bar" => v}` sets a
+different, literal-keyed signal the binding never reads. ✅ Simplest: give island
+bindings flat top-level signal names (like the `note` signal above) and avoid the
+question entirely.
 
 ❌ **Scoping island CSS to a marker attribute** (e.g. `[data-island] …`). A marker
 can be dropped in a refactor and silently un-scope every rule. ✅ Scope to the
