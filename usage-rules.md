@@ -186,6 +186,15 @@ Client reconnection:
      data-on:online__window="@post('/stream', {retryMaxCount: Infinity})">
 ```
 
+## JavaScript Islands
+
+Embedding a stateful, JS-managed-DOM component (rich-text editor, map, chart,
+canvas) in a Datastar page? Make it a **custom element that is also a Datastar
+form control**: `data-bind` a `value` property for state, patch the signal for
+content, dispatch element-targeted `CustomEvent`s for commands, and add
+`data-ignore-morph` so the morph leaves its subtree alone. Full pattern + gotchas:
+`usage-rules/javascript-islands.md`.
+
 ## Anti-patterns
 
 **❌ Don't:**
