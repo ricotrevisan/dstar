@@ -61,7 +61,7 @@ class PlainEditor extends HTMLElement {
   }
 
   set value(html) {
-    if (!this._box) { this.dataset.content = html || ""; return; } // no-op before mount
+    if (!this._box) { this.dataset.content = html || ""; return; } // not yet mounted — stash so connectedCallback applies it
     if ((html || "") === this._box.innerHTML) return;              // idempotent
     this._applying = true;
     this._box.innerHTML = html || "";
@@ -123,7 +123,7 @@ DOM exists, it re-applies content over freshly-loaded state and can clobber it.
 ❌ **Assuming `Dstar.patch_signals` nests dotted keys.** It JSON-encodes the map
 as-is. A signal bound as `data-bind="foo.bar"` must be set with the matching shape
 — pick one representation (`%{"foo.bar" => v}`) and use it consistently across
-call sites.
+call sites (a nested map like `%{foo: %{bar: v}}` would emit `{"foo":{"bar":…}}` and never match a signal bound as `foo.bar`).
 
 ❌ **Scoping island CSS to a marker attribute** (e.g. `[data-island] …`). A marker
 can be dropped in a refactor and silently un-scope every rule. ✅ Scope to the
