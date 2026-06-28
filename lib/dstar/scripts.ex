@@ -136,8 +136,28 @@ defmodule Dstar.Scripts do
 
   defp escape_html_attr(other), do: to_string(other)
 
+  # A `<script>` element ends only at `</script` (case-insensitive, followed
+  # by `>`, whitespace, or `/`). Neutralize it by inserting a backslash right
+  # after the `<`, so the HTML parser sees `<\/script` — not a closing tag —
+  # while the value stays intact in every JS context:
+  #
+  #   * in a string/template literal, `<\/script` === `</script`;
+  #   * a regex literal can never contain an unescaped `</script` (the `/`
+  #     would terminate the regex), so it is never matched/altered.
+  #
+  # We deliberately do NOT touch `<script` or `<!--`: backslashing those
+  # (`<\script`, `<\!--`) silently corrupts developer regex literals (`\s`
+  # becomes a whitespace class, `\!` is an invalid unicode-mode escape), and
+  # they cannot break out on their own — ending the element still requires a
+  # `</script`, which this neutralizes. (A `<!--<script>` chain only makes the
+  # wrapper's own `</script>` fail to close, turning the injected text into an
+  # inert syntax error with nothing after it to capture.)
+  @script_close ~r{</script}i
+
   defp escape_script_content(script) do
-    String.replace(script, "</script>", "<\\/script>")
+    Regex.replace(@script_close, script, fn match ->
+      "<\\" <> String.slice(match, 1..-1//1)
+    end)
   end
 
   defp escape_js_string(str) do
