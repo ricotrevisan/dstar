@@ -262,6 +262,87 @@ defmodule Dstar.ScriptsTest do
     end
   end
 
+  describe "script attribute name validation (S3)" do
+    test "rejects an attribute name that would break out of the <script> tag" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, ~r/attribute name/i, fn ->
+        Scripts.execute(conn, "x = 1",
+          attributes: %{"x></script><img src=q onerror=alert(1)" => "z"}
+        )
+      end
+    end
+
+    test "rejects an attribute name containing a quote (event-handler injection)" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, ~r/attribute name/i, fn ->
+        Scripts.execute(conn, "x = 1", attributes: %{"a\" onload=\"alert(1)" => "z"})
+      end
+    end
+
+    test "rejects an attribute name with a space" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, ~r/attribute name/i, fn ->
+        Scripts.execute(conn, "x = 1", attributes: %{"a onload=alert(1)" => "z"})
+      end
+    end
+
+    test "allows ordinary attribute names (letters, digits, - _ : .)" do
+      conn = chunked_conn()
+
+      result =
+        Scripts.execute(conn, "x = 1",
+          auto_remove: false,
+          attributes: %{"type" => "module", "data-on:click" => "y", :data_value => "v"}
+        )
+
+      output = chunks(result)
+      assert result.state == :chunked
+      assert output =~ ~s(type="module")
+      assert output =~ ~s(data-on:click="y")
+      assert output =~ ~s(data_value="v")
+    end
+
+    test "rejects an attribute name containing a newline (anchored, not \\Z/$)" do
+      conn = chunked_conn()
+
+      assert_raise ArgumentError, ~r/attribute name/i, fn ->
+        Scripts.execute(conn, "x = 1",
+          attributes: %{"type\nx></script><img src=x onerror=alert(1)>" => "z"}
+        )
+      end
+    end
+
+    test "escapes a non-binary (charlist) attribute value so it cannot break out" do
+      conn = chunked_conn()
+
+      result =
+        Scripts.execute(conn, "x = 1",
+          auto_remove: false,
+          attributes: %{"type" => ~c"\"></script><img src=x onerror=alert(1)>"}
+        )
+
+      output = chunks(result)
+      assert script_closers(output) == 1, output
+      refute output =~ "<img src=x onerror"
+    end
+
+    test "escapes a non-binary (atom) attribute value so it cannot break out" do
+      conn = chunked_conn()
+
+      result =
+        Scripts.execute(conn, "x = 1",
+          auto_remove: false,
+          attributes: %{"data-x" => :"\"></script><b>pwn"}
+        )
+
+      output = chunks(result)
+      assert script_closers(output) == 1, output
+    end
+  end
+
   describe "redirect/3" do
     test "redirects to a basic URL" do
       conn = chunked_conn()

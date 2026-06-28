@@ -47,7 +47,7 @@ defmodule Dstar.Scripts do
     attr_list =
       all_attributes
       |> Map.to_list()
-      |> Enum.map(fn {k, v} -> ~s(#{k}="#{escape_html_attr(v)}") end)
+      |> Enum.map(fn {k, v} -> ~s(#{validate_attr_name!(k)}="#{escape_html_attr(v)}") end)
 
     attrs_str = if attr_list == [], do: "", else: " " <> Enum.join(attr_list, " ")
 
@@ -126,6 +126,26 @@ defmodule Dstar.Scripts do
 
   # Private helpers
 
+  # Attribute *values* are escaped, but the name is written verbatim into the
+  # opening tag, so a name carrying `>`/`"`/space/etc. would break out of the
+  # `<script …>` tag and inject live markup. Restrict names to a conservative
+  # allowlist that still covers ordinary and Datastar attributes
+  # (`type`, `nonce`, `data-effect`, `data-on:click`, …) and reject anything
+  # else rather than silently mangle it.
+  @attr_name ~r/\A[A-Za-z0-9_:.-]+\z/
+
+  defp validate_attr_name!(name) do
+    str = to_string(name)
+
+    if Regex.match?(@attr_name, str) do
+      str
+    else
+      raise ArgumentError,
+            "invalid script attribute name #{inspect(name)} — names may contain only " <>
+              "letters, digits, and the characters - _ : ."
+    end
+  end
+
   defp escape_html_attr(str) when is_binary(str) do
     str
     |> String.replace("&", "&amp;")
@@ -134,7 +154,9 @@ defmodule Dstar.Scripts do
     |> String.replace(">", "&gt;")
   end
 
-  defp escape_html_attr(other), do: to_string(other)
+  # Non-binary values (charlists, atoms, …) must be stringified AND escaped —
+  # emitting them raw lets a value close the quote and break out of the tag.
+  defp escape_html_attr(other), do: escape_html_attr(to_string(other))
 
   # A `<script>` element ends only at `</script` (case-insensitive, followed
   # by `>`, whitespace, or `/`). Neutralize it by inserting a backslash right
