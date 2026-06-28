@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.3 — 2026-06-28
+
+### Security
+
+- **`<script>` attribute injection in `Dstar.Scripts.execute_script/3`.**
+  The `:attributes` option interpolated attribute *names* verbatim and emitted
+  non-binary attribute *values* unescaped, so a developer routing untrusted
+  data into a script-tag attribute name (or a non-string value) could break
+  out of the `<script …>` tag and inject live markup. Attribute names are now
+  validated against `[A-Za-z0-9_:.-]` (rejected otherwise), and all attribute
+  values — including charlists, atoms, and other non-binaries — are
+  HTML-escaped. Found via adversarial review of the 0.1.2 fix.
+
 ## 0.1.2 — 2026-06-28
 
 ### Security
