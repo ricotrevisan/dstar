@@ -40,7 +40,7 @@ defmodule Dstar.MixProject do
       links: %{"GitHub" => @source_url},
       maintainers: ["Rico Trevisan"],
       files:
-        ~w(lib docs usage-rules.md usage-rules .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
+        ~w(lib docs/migrating-from-phoenix-datastar.md usage-rules.md usage-rules .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
