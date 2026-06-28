@@ -219,9 +219,13 @@ defmodule Dstar.Elements do
   defp maybe_add_elements(lines, nil), do: lines
 
   defp maybe_add_elements(lines, html) do
+    # Split on every SSE line terminator (CR, LF, CRLF) so each physical line
+    # of HTML becomes its own `data: elements <line>`. Splitting only on LF
+    # would let a lone CR survive inside a single data line, where the client
+    # re-splits on it — forging additional SSE events (see Dstar.SSE).
     html_lines =
       html
-      |> String.split("\n")
+      |> String.split(["\r\n", "\r", "\n"])
       |> Enum.map(&("elements " <> &1))
 
     lines ++ html_lines
