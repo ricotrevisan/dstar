@@ -142,24 +142,47 @@ defmodule Dstar.SSE do
   """
   @spec format_event(String.t(), [String.t()]) :: String.t()
   def format_event(event_type, data_lines) do
-    event_line = "event: #{event_type}\n"
-    data_content = Enum.map_join(data_lines, "\n", &"data: #{&1}")
+    event_line = "event: #{strip_line_breaks(event_type)}\n"
+
+    data_content =
+      data_lines
+      |> Enum.flat_map(&split_data_value/1)
+      |> Enum.map_join("\n", &"data: #{&1}")
+
     "#{event_line}#{data_content}\n\n"
   end
 
-  # Private helpers
+  # Private helpers — SSE framing safety
+  #
+  # Per the WHATWG EventSource spec an SSE line ends on CR, LF, or CRLF, so a
+  # value carrying any of those could otherwise inject a blank line
+  # (dispatching a forged event) or a forged field into the stream. We defend
+  # both shapes of field:
+  #
+  #   * `data:` is multi-line — each terminator starts a *new* `data:` line.
+  #   * `event:` / `id:` / `retry:` are single-valued — terminators are
+  #     stripped, since a multi-line value is never meaningful for them.
+
+  defp split_data_value(value), do: String.split(value, ["\r\n", "\r", "\n"])
+
+  defp strip_line_breaks(value), do: value |> to_string() |> String.replace(["\r", "\n"], "")
 
   defp maybe_add_event(lines, nil), do: lines
-  defp maybe_add_event(lines, event_type), do: lines ++ ["event: #{event_type}\n"]
+
+  defp maybe_add_event(lines, event_type),
+    do: lines ++ ["event: #{strip_line_breaks(event_type)}\n"]
 
   defp maybe_add_id(lines, nil), do: lines
-  defp maybe_add_id(lines, id), do: lines ++ ["id: #{id}\n"]
+  defp maybe_add_id(lines, id), do: lines ++ ["id: #{strip_line_breaks(id)}\n"]
 
   defp maybe_add_retry(lines, nil), do: lines
   defp maybe_add_retry(lines, 1000), do: lines
-  defp maybe_add_retry(lines, retry), do: lines ++ ["retry: #{retry}\n"]
+  defp maybe_add_retry(lines, retry), do: lines ++ ["retry: #{strip_line_breaks(retry)}\n"]
 
   defp add_data_lines(lines, data_lines) do
-    lines ++ Enum.map(data_lines, &"data: #{&1}\n")
+    lines ++
+      Enum.flat_map(data_lines, fn value ->
+        Enum.map(split_data_value(value), &"data: #{&1}\n")
+      end)
   end
 end

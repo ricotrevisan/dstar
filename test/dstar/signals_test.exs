@@ -10,6 +10,23 @@ defmodule Dstar.SignalsTest do
     |> SSE.start()
   end
 
+  describe "frame safety (S1)" do
+    test "carriage returns in signal values stay JSON-escaped and never reach the wire" do
+      frame = Signals.format_patch(%{name: "a\rb\nc"})
+
+      # Jason escapes control chars, so no raw CR/LF can break the SSE frame.
+      refute frame =~ "\r"
+
+      blank_before_terminator? =
+        frame
+        |> String.replace_suffix("\n\n", "")
+        |> String.split(["\r\n", "\r", "\n"])
+        |> Enum.any?(&(&1 == ""))
+
+      refute blank_before_terminator?
+    end
+  end
+
   describe "read/1" do
     test "reads signals from GET query params" do
       conn = %Plug.Conn{

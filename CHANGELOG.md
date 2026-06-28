@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.1 — 2026-06-28
+
+### Security
+
+- **SSE frame injection via carriage returns.** `Dstar.Elements` framed
+  element HTML and selectors into SSE `data:` lines by splitting only on
+  `\n`, so a lone carriage return (`\r`) in attacker-controlled content
+  survived into the wire stream. The browser's `EventSource` parser treats
+  CR, LF, and CRLF as line terminators, so this let an attacker forge
+  additional SSE events — e.g. a `datastar-patch-signals` event spoofing
+  client signals, or a `<script>` DOM injection — affecting every viewer of
+  the patched fragment. `Dstar.SSE` now splits every `data:` value on all
+  line terminators, and strips line breaks from the single-valued `event:`,
+  `id:`, and `retry:` fields (the latter reachable through the `:event_id`
+  and `:retry` options on `patch_elements`, `patch_signals`, and the script
+  helpers). Found via internal security audit.
+
 ## 0.1.0 — 2026-06-14
 
 ### Fixed

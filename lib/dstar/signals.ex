@@ -78,6 +78,11 @@ defmodule Dstar.Signals do
   @doc """
   Patches signals using a raw JSON string.
 
+  The JSON must be a single line. Embedded line breaks are split across
+  multiple SSE `data:` lines for wire safety, which the client will not
+  reassemble into one `signals` payload — pass compact JSON (as
+  `Jason.encode!/1` produces) or use `patch/3`.
+
   ## Example
 
       conn

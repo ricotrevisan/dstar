@@ -4,6 +4,22 @@ defmodule Dstar.SSETest do
 
   alias Dstar.SSE
 
+  # Raw SSE bytes accumulated on a chunked test conn.
+  defp sent_frame(conn) do
+    {_adapter, state} = conn.adapter
+    state.chunks
+  end
+
+  # True if a blank line appears before the terminating "\n\n" — i.e. a value
+  # broke out of its field and would dispatch a forged event. EventSource
+  # splits on CR, LF, or CRLF (WHATWG spec).
+  defp forged_dispatch?(frame) do
+    frame
+    |> String.replace_suffix("\n\n", "")
+    |> String.split(["\r\n", "\r", "\n"])
+    |> Enum.any?(&(&1 == ""))
+  end
+
   describe "format_event/2" do
     test "formats a basic event" do
       result = SSE.format_event("my-event", ["hello world"])
@@ -20,6 +36,27 @@ defmodule Dstar.SSETest do
     test "formats empty data lines" do
       result = SSE.format_event("my-event", [])
       assert result == "event: my-event\n\n\n"
+    end
+
+    test "splits a data value containing CR/LF into separate data lines (S1)" do
+      # A data: field cannot contain a line terminator; an embedded CR, LF,
+      # or CRLF must start a new data: line so it cannot inject a blank line
+      # or a forged field into the stream.
+      result = SSE.format_event("e", ["a\rb\nc\r\nd"])
+
+      refute result =~ "\r"
+      assert result == "event: e\ndata: a\ndata: b\ndata: c\ndata: d\n\n"
+    end
+
+    test "a CR-laden data value cannot inject a blank line (S1)" do
+      result = SSE.format_event("e", ["x\r\revent: forged"])
+
+      refute result =~ "\r"
+      # Strip the terminating blank line; nothing else may be blank.
+      refute result
+             |> String.replace_suffix("\n\n", "")
+             |> String.split(["\r\n", "\r", "\n"])
+             |> Enum.any?(&(&1 == ""))
     end
   end
 
@@ -45,6 +82,46 @@ defmodule Dstar.SSETest do
 
       assert conn.state == :chunked
       assert conn.status == 200
+    end
+  end
+
+  describe "control-field frame injection (S1)" do
+    test "event_id cannot inject a forged frame" do
+      conn = conn(:post, "/t") |> SSE.start()
+
+      conn =
+        SSE.send_event!(conn, "evt", ["data"],
+          event_id: "1\r\revent: datastar-patch-signals\rdata: signals {\"isAdmin\":true}"
+        )
+
+      frame = sent_frame(conn)
+      refute frame =~ "\r"
+      refute forged_dispatch?(frame)
+    end
+
+    test "retry cannot inject a forged frame" do
+      conn = conn(:post, "/t") |> SSE.start()
+      conn = SSE.send_event!(conn, "evt", ["data"], retry: "5000\r\revent: forged")
+
+      frame = sent_frame(conn)
+      refute frame =~ "\r"
+      refute forged_dispatch?(frame)
+    end
+
+    test "format_event strips line breaks from the event type" do
+      result = SSE.format_event("evt\r\revent: forged", ["data"])
+
+      refute result =~ "\r"
+      refute forged_dispatch?(result)
+    end
+
+    test "send_event strips line breaks from the event type" do
+      conn = conn(:post, "/t") |> SSE.start()
+      conn = SSE.send_event!(conn, "evt\r\revent: forged", ["data"])
+
+      frame = sent_frame(conn)
+      refute frame =~ "\r"
+      refute forged_dispatch?(frame)
     end
   end
 
