@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.2 — 2026-06-28
+
+### Security
+
+- **Incomplete `<script>` end-tag escaping in `Dstar.Scripts`.**
+  `execute_script/2`, `console_log/2`, and `redirect/2` neutralized only an
+  exact, lowercase `</script>` in the script body, so attacker-controlled
+  content containing `</SCRIPT>`, `</script >`, `</script/>`, or `</script`
+  followed by any terminator broke out of the appended `<script>` element
+  (HTML closes script data case-insensitively), enabling stored XSS — e.g.
+  logging a user-controlled value with `console_log/2`. Escaping now
+  neutralizes every `</script` case-insensitively, while leaving developer
+  JavaScript — including regex literals like `/<script/` — byte-identical.
+  Found via internal security audit.
+
 ## 0.1.1 — 2026-06-28
 
 ### Security

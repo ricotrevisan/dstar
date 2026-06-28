@@ -147,6 +147,121 @@ defmodule Dstar.ScriptsTest do
     end
   end
 
+  describe "script breakout escaping (S2)" do
+    # The wrapper is `<script ...>BODY</script>`. After escaping, the only
+    # HTML-parseable `<script` opener and `</script` closer in the output must
+    # be the wrapper's — any in BODY must be backslash-broken so the HTML
+    # parser can't end the element early. HTML closes `<script>` on `</script`
+    # followed by `>`, whitespace, or `/`, case-insensitively.
+    defp script_closers(output), do: Regex.scan(~r{</script}i, output) |> length()
+
+    test "neutralizes an uppercase </SCRIPT> breakout in the body" do
+      conn = chunked_conn()
+
+      result =
+        Scripts.execute(conn, "x = '</SCRIPT><img src=x onerror=alert(1)>'", auto_remove: false)
+
+      output = chunks(result)
+
+      assert script_closers(output) == 1, "only the wrapper </script> may remain: #{output}"
+    end
+
+    test "neutralizes </script with a trailing space (not just </script>)" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "x = '</script ><svg onload=alert(1)>'", auto_remove: false)
+      output = chunks(result)
+
+      assert script_closers(output) == 1, output
+    end
+
+    test "neutralizes </script/> self-closing variant" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "x = '</script/>'", auto_remove: false)
+      output = chunks(result)
+
+      assert script_closers(output) == 1, output
+    end
+
+    test "neutralizes </script followed by a tab terminator" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "x = '</script\t>'", auto_remove: false)
+      output = chunks(result)
+
+      assert script_closers(output) == 1, output
+    end
+
+    test "a lone <script opener in the body cannot end the wrapper (only the wrapper opener remains parseable)" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "x = '<script>foo()'", auto_remove: false)
+      output = chunks(result)
+
+      # No </script closer is reachable, so the wrapper still closes exactly once.
+      assert script_closers(output) == 1, output
+    end
+
+    test "preserves a <script opener inside a developer regex literal (no semantic flip)" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "var re = /<script/", auto_remove: false)
+      output = chunks(result)
+
+      # Inserting a backslash would turn /<script/ into /<\script/ (\\s = whitespace
+      # class) — a silent meaning change. Raw JS must be passed through verbatim.
+      assert output =~ "var re = /<script/"
+    end
+
+    test "preserves an <!-- token inside a developer unicode regex literal (no SyntaxError)" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "var re = /<!--[\\s\\S]*?-->/u", auto_remove: false)
+      output = chunks(result)
+
+      # /<\\!--/u is an Invalid escape (SyntaxError) — must not be introduced.
+      assert output =~ "var re = /<!--[\\s\\S]*?-->/u"
+    end
+
+    test "console_log neutralizes </SCRIPT> in a user message" do
+      conn = chunked_conn()
+      result = Scripts.console_log(conn, "</SCRIPT><img src=x onerror=alert(1)>")
+      output = chunks(result)
+
+      assert script_closers(output) == 1, output
+    end
+
+    test "redirect neutralizes </SCRIPT> in the URL" do
+      conn = chunked_conn()
+      result = Scripts.redirect(conn, "/x</SCRIPT><img src=x onerror=alert(1)>")
+      output = chunks(result)
+
+      assert script_closers(output) == 1, output
+    end
+
+    test "still neutralizes the plain lowercase </script> (regression)" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "x = '</script>'", auto_remove: false)
+      output = chunks(result)
+
+      assert script_closers(output) == 1, output
+    end
+
+    test "a <!--<script> double-escape chain cannot inject a parseable closer" do
+      conn = chunked_conn()
+      # Without a reachable </script the wrapper still closes exactly once; the
+      # injected text is inert (at worst it makes the wrapper's own close fail,
+      # turning the payload into a syntax error with nothing after it).
+      result = Scripts.execute(conn, "x = '<!--<script>alert(1)'", auto_remove: false)
+      output = chunks(result)
+
+      assert script_closers(output) == 1, output
+    end
+
+    test "does not alter legitimate JS comparison operators" do
+      conn = chunked_conn()
+      result = Scripts.execute(conn, "if (a < b && c > d) { run() }", auto_remove: false)
+      output = chunks(result)
+
+      assert output =~ "if (a < b && c > d) { run() }"
+    end
+  end
+
   describe "redirect/3" do
     test "redirects to a basic URL" do
       conn = chunked_conn()
