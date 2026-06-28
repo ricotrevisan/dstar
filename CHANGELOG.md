@@ -4,7 +4,7 @@
 
 ### Security
 
-- **`<script>` attribute injection in `Dstar.Scripts.execute_script/3`.**
+- **`<script>` attribute injection in `Dstar.execute_script/3`.**
   The `:attributes` option interpolated attribute *names* verbatim and emitted
   non-binary attribute *values* unescaped, so a developer routing untrusted
   data into a script-tag attribute name (or a non-string value) could break
