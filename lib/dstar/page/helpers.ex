@@ -105,4 +105,13 @@ defmodule Dstar.Page.Helpers do
     html = component.(assigns)
     Dstar.Elements.patch(conn, html, opts)
   end
+
+  @doc """
+  Wires a container to re-run `action` whenever that nudge fires.
+
+      <div id="posts" {on_nudge("posts", event("reload"))}>
+
+  See `Dstar.Actions.on_nudge/2`.
+  """
+  defdelegate on_nudge(key, action), to: Dstar.Actions
 end

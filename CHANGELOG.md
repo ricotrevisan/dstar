@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Live collections.** Helpers for keeping a list current in every open tab,
+  plus a [usage-rules topic](usage-rules/live-collections.md) documenting the
+  blind-stream trap.
+  - `Dstar.Signals.nudge/3` (facade `Dstar.nudge/3`) — patch `nudges.<key>`
+    with a fresh integer so each tab re-runs its own load action with its own
+    filter/sort/page signals. The default for any non-plain view.
+  - `Dstar.Actions.on_nudge/2` (also in `Dstar.Page.Helpers`) — the client
+    half, an attribute map for HEEx spread that fires only on that nudge.
+  - `Dstar.Elements.append/4` (facade `Dstar.append_elements/4`) and
+    `Dstar.Elements.upsert/3` (facade `Dstar.upsert_elements/3`) — the row
+    mutation fast path for plain feeds.
+
 ## 0.1.3 — 2026-06-28
 
 ### Security

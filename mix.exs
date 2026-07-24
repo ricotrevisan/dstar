@@ -49,7 +49,12 @@ defmodule Dstar.MixProject do
       main: "readme",
       source_url: @source_url,
       source_ref: "v#{@version}",
-      extras: ["README.md", "CHANGELOG.md", "docs/migrating-from-phoenix-datastar.md"],
+      extras: [
+        "README.md",
+        "CHANGELOG.md",
+        "usage-rules/live-collections.md",
+        "docs/migrating-from-phoenix-datastar.md"
+      ],
       groups_for_modules: [
         Pages: [
           Dstar.Page,

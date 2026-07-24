@@ -302,6 +302,30 @@ Sends a `datastar-patch-elements` event that removes matching elements.
 conn |> Dstar.remove_elements("#flash-message")
 ```
 
+### `Dstar.append_elements(conn, html, container, opts \\ [])` → `Plug.Conn.t()`
+
+Appends an element as the last child of a container.
+
+```elixir
+conn |> Dstar.append_elements(post_row(%{post: post}), "#posts")
+```
+
+### `Dstar.upsert_elements(conn, html, opts \\ [])` → `Plug.Conn.t()`
+
+Morphs the element whose DOM `id` matches the root of `html`. Dropped by the client if this tab never rendered that row.
+
+```elixir
+conn |> Dstar.upsert_elements(post_row(%{post: post}))
+```
+
+### `Dstar.nudge(conn, key, opts \\ [])` → `Plug.Conn.t()`
+
+Signals that a collection changed, without saying how. Each tab re-runs its own load action with its own filter/sort/page signals.
+
+```elixir
+conn |> Dstar.nudge("posts")
+```
+
 ### `Dstar.post(module, event_name)` → `String.t()`
 
 Generates a `@post(...)` expression for use in Datastar attributes. All HTTP verbs are available: `Dstar.get/2,3`, `Dstar.put/2,3`, `Dstar.patch/2,3`, `Dstar.delete/2,3` — they all follow the same API.
@@ -401,6 +425,27 @@ dropped connections, and `online__window` re-establishes the stream when the
 network returns.
 
 The library provides the SSE plumbing. Your app provides the PubSub topic and the business logic.
+
+## Live Collections
+
+Keeping a list current in every open tab is the most common streaming payload, and the obvious approach is a trap. The stream opened at page load and SSE is one-way, so it can never learn a tab's *current* filter, sort or page — blindly appending or morphing rows produces silently wrong UIs in every tab that isn't showing a plain feed.
+
+The default is the **nudge**: push only "this data changed", and let each tab re-run its own load action, which carries that tab's signals.
+
+```elixir
+# Default — correct for filtered/sorted/paginated views
+def handle_info({:posts_changed, _}, conn), do: nudge(conn, "posts")
+
+# Fast path — plain, unfiltered feed only
+def handle_info({:post_created, post}, conn),
+  do: append_elements(conn, post_row(%{post: post}), "#posts")
+```
+
+```heex
+<div id="posts" {on_nudge("posts", event("reload"))}>
+```
+
+Full pattern, DOM-id discipline and the consistency window: [Live collections](usage-rules/live-collections.md).
 
 ## Stream Deduplication (Optional)
 

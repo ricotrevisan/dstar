@@ -132,6 +132,46 @@ defmodule Dstar do
     Dstar.Elements.remove(conn, selector, opts)
   end
 
+  @doc """
+  Appends an element as the last child of a container, via SSE.
+
+  ## Example
+
+      conn |> Dstar.append_elements(post_row(%{post: post}), "#posts")
+
+  """
+  def append_elements(conn, html, container, opts \\ []) do
+    Dstar.Elements.append(conn, html, container, opts)
+  end
+
+  @doc """
+  Morphs the element whose DOM id matches the root of `html`, via SSE.
+
+  Dropped by the client if this tab has no element with that id — see
+  `Dstar.Elements.upsert/3`.
+
+  ## Example
+
+      conn |> Dstar.upsert_elements(post_row(%{post: post}))
+
+  """
+  def upsert_elements(conn, html, opts \\ []) do
+    Dstar.Elements.upsert(conn, html, opts)
+  end
+
+  @doc """
+  Signals that a collection changed, so each tab reloads it with its own
+  filter/sort/page signals.
+
+  ## Example
+
+      conn |> Dstar.nudge("posts")
+
+  """
+  def nudge(conn, key, opts \\ []) do
+    Dstar.Signals.nudge(conn, key, opts)
+  end
+
   # ── HTTP verb helpers ─────────────────────────────────────────────────
 
   @doc """

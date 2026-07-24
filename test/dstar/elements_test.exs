@@ -251,4 +251,44 @@ defmodule Dstar.ElementsTest do
       end
     end
   end
+
+  describe "append/4" do
+    test "emits selector and append mode" do
+      conn = Elements.append(chunked_conn(), "<li id=\"post-1\">hi</li>", "#posts")
+
+      assert conn.resp_body ==
+               "event: datastar-patch-elements\n" <>
+                 "data: selector #posts\n" <>
+                 "data: mode append\n" <>
+                 "data: elements <li id=\"post-1\">hi</li>\n\n"
+    end
+
+    test "passes options through to patch/3" do
+      conn = Elements.append(chunked_conn(), "<li>hi</li>", "#posts", event_id: "e1")
+
+      assert conn.resp_body =~ "id: e1\n"
+    end
+
+    test "accepts a {:safe, iodata} tuple" do
+      conn = Elements.append(chunked_conn(), {:safe, ["<li>", "hi", "</li>"]}, "#posts")
+
+      assert conn.resp_body =~ "data: elements <li>hi</li>\n"
+    end
+  end
+
+  describe "upsert/3" do
+    test "emits no selector line so Datastar targets by element id" do
+      conn = Elements.upsert(chunked_conn(), "<li id=\"post-1\">hi</li>")
+
+      assert conn.resp_body ==
+               "event: datastar-patch-elements\n" <>
+                 "data: elements <li id=\"post-1\">hi</li>\n\n"
+    end
+
+    test "emits no mode line (outer is the default morph)" do
+      conn = Elements.upsert(chunked_conn(), "<li id=\"post-1\">hi</li>")
+
+      refute conn.resp_body =~ "data: mode"
+    end
+  end
 end

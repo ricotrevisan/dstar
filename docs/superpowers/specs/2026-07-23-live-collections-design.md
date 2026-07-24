@@ -2,7 +2,9 @@
 
 **Date:** 2026-07-23
 **Issue:** [#7](https://github.com/ricotrevisan/dstar/issues/7) (part of epic [#16](https://github.com/ricotrevisan/dstar/issues/16))
-**Status:** approved design, pre-implementation
+**Status:** implemented 2026-07-24 (spike verified against Datastar v1 free bundle
+and Pro v1.0.2). Facade names resolved to `append_elements` / `upsert_elements` /
+`nudge` — see "Open decision" below.
 **Scope:** dstar core only. The Ash adapter (`AshDstar.Stream`, #9) is specced separately in the `ash_dstar` repo and builds on this.
 
 ## Context
@@ -101,12 +103,19 @@ The client half. Returns an attribute **map** for HEEx spread:
 <div id="posts" {on_nudge("posts", event("reload"))}>
 ```
 
-emits (attribute names to be spike-verified against the v1 bundle):
+emits (attribute names verified against the v1 bundle, 2026-07-24):
 
 ```html
-data-on:signal-patch="@post(…reload…)"
-data-on:signal-patch-filter="{include: /^nudges\.posts$/}"
+data-on-signal-patch="@post(…reload…)"
+data-on-signal-patch-filter="{&quot;include&quot;:&quot;^nudges\\.posts$&quot;}"
 ```
+
+**Not** `data-on:signal-patch` — the plugin's registered name is literally
+`on-signal-patch`, and the attribute parser splits plugin-from-key on `:`
+only (`t.split(/:(.+)/)`). `data-on:signal-patch` parses as plugin `on` with
+key `signal-patch`, i.e. a listener for a DOM event that is never dispatched
+(the real event is `datastar-signal-patch`) — a silent no-op. The filter is a
+sibling attribute read with `getAttribute`, not a key.
 
 so the action re-runs only when *that* nudge changes — and, unlike
 `data-effect`, not on page init. Same `key` validation as `nudge/3`.
@@ -118,17 +127,17 @@ Re-exported from `Dstar.Page.Helpers` (defdelegate) so pages get it alongside
 ```elixir
 # Fast path — plain feed:
 def handle_info({:post_created, post}, conn),
-  do: Dstar.append(conn, post_row(%{post: post}), "#posts")
+  do: append_elements(conn, post_row(%{post: post}), "#posts")
 
 def handle_info({:post_updated, post}, conn),
-  do: Dstar.upsert(conn, post_row(%{post: post}))
+  do: upsert_elements(conn, post_row(%{post: post}))
 
 def handle_info({:post_deleted, id}, conn),
-  do: Dstar.remove_elements(conn, "#post-#{id}")
+  do: remove_elements(conn, "#post-#{id}")
 
 # Default for filtered/sorted/paginated views:
 def handle_info({:posts_changed, _}, conn),
-  do: Dstar.nudge(conn, "posts")
+  do: nudge(conn, "posts")
 ```
 
 The reload handler is an ordinary page event that re-queries with the signals
@@ -150,18 +159,31 @@ New `usage-rules/live-collections.md`:
 
 README gets a short "Live collections" section linking to the topic.
 
-## Spike before coding (verify against the Datastar v1 bundle)
+## Spike results (verified against the Datastar v1 bundle, 2026-07-24)
 
-- [ ] Exact attribute names for the signal-patch event and its filter
-      (`data-on:signal-patch` / `data-on:signal-patch-filter` assumed) and the
-      filter expression syntax (`{include: /regex/}` assumed).
-- [ ] Whether the signal-patch event fires when a patch sets a signal to its
-      *current* value (if yes, `unique_integer` monotonicity is belt-and-braces;
-      if no, it is load-bearing).
-- [ ] Morph behavior when no element matches the patched element's id
-      (assumed: dropped, console warning) — documented in `upsert/3`.
-- [ ] `mode: :append` target semantics (assumed: appended as last child of the
-      selector match).
+- [x] **Attribute names — assumption was wrong.** Correct:
+      `data-on-signal-patch` + `data-on-signal-patch-filter`. See the
+      `on_nudge/2` section above for why the colon form silently no-ops.
+      Filter syntax `{include, exclude}` confirmed; the attribute value is
+      parsed with `JSON.parse` first and falls back to `Function("return (…)")`,
+      and `include` accepts a **string** as well as a regex literal
+      (`typeof e == "string" ? RegExp(e.replace(/^\/|\/$/g, "")) : e`).
+      Emit the JSON string form — it needs no eval, so it survives a strict
+      CSP. Defaults: `include: /.*/`, `exclude: /(?!)/`.
+- [x] **Unchanged values do not fire — `unique_integer` is load-bearing.**
+      The signal write returns a changed-flag
+      (`if (e.t !== (e.t = t[0])) { … return true } return false`) and the
+      patch-event enqueue is gated on it. Patching a nudge to its current
+      value dispatches nothing.
+- [x] **Missing id: patch is dropped**, with
+      `console.warn(PatchElementsNoTargetsFound, {element: {id}})`. The
+      `upsert/3` sharp edge as documented is accurate.
+- [x] **`mode: :append` appends as last child** (`target.append(clone)`).
+      Datastar additionally throws `PatchElementsExpectedSelector` for any
+      mode other than `outer`/`replace` without a selector, so `append/4`'s
+      required `container` argument matches client-side enforcement. Note for
+      the docs: non-`outer` modes apply to *every* `querySelectorAll` match,
+      cloning the element per target.
 
 ## Testing strategy (TDD)
 
@@ -170,8 +192,11 @@ README gets a short "Live collections" section linking to the topic.
   `datastar-patch-signals` for `nudges.<key>` with changing values across two
   calls; key validation raises; `on_nudge/2` returns the exact attribute map
   (regex-escaped key).
-- **Acceptance (Ash-free, per issue #7):** a test page under `test/support`
-  subscribed to a plain `Phoenix.PubSub` topic; broadcasts drive
+- **Acceptance (Ash-free, per issue #7):** a test page defined **inline in the
+  test file** (there is no `test/support` dir and no `elixirc_paths` override
+  for `:test`; `test/dstar/page/plug_test.exs` defines its pages inline —
+  follow that rather than adding build config), subscribed to a plain
+  `Phoenix.PubSub` topic; broadcasts drive
   append/upsert/remove and a nudge through the real `Dstar.Page.Plug` loop;
   assert the accumulated SSE body. Phoenix is already an optional test dep
   (page tests exist today), so this adds no new deps.
@@ -187,6 +212,24 @@ README gets a short "Live collections" section linking to the topic.
   validated keys.
 - **No subscribe helper** — subscribing is app-side (`Phoenix.PubSub` or
   Endpoint), keeping core dep-free.
+
+## Open decision — resolved 2026-07-24
+
+**Facade names: `append_elements` / `upsert_elements` / `nudge`.** Module-level
+names stay short (`Elements.append/4`, `Elements.upsert/3`,
+`Signals.nudge/3`); the flat facade takes the `_elements` suffix, matching
+`patch_elements` / `remove_elements`. The deciding fact is `lib/dstar/page.ex`:
+pages import the conn-first ops unqualified, and the comment above that import
+list already records that the bare verbs (`post`, `patch`, `event`) are the URL
+builders. A bare `Dstar.append` would sit in the ambiguous middle. `nudge` has
+no such clash, so it keeps the short name. In a page handler this reads:
+
+```elixir
+def handle_info({:post_created, post}, conn),
+  do: append_elements(conn, post_row(%{post: post}), "#posts")
+
+def handle_info({:posts_changed, _}, conn), do: nudge(conn, "posts")
+```
 
 ## Relationship to roadmap
 

@@ -110,4 +110,11 @@ defmodule Dstar.Page.HelpersTest do
       assert conn.resp_body =~ "n=7"
     end
   end
+
+  describe "on_nudge/2" do
+    test "is available to templates alongside event/2" do
+      assert on_nudge("posts", event("reload")) ==
+               Dstar.Actions.on_nudge("posts", event("reload"))
+    end
+  end
 end

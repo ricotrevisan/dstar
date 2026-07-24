@@ -13,6 +13,7 @@ defmodule Dstar.Signals do
   @datastar_key "datastar"
   @event_type "datastar-patch-signals"
   @default_only_if_missing false
+  @nudge_key_format ~r/^[a-zA-Z0-9_]+$/
 
   @doc """
   Reads signals from a Plug connection.
@@ -165,6 +166,48 @@ defmodule Dstar.Signals do
   def remove_signals(conn, paths, opts) when is_list(paths) do
     nil_map = paths_to_nil_map(paths)
     patch(conn, nil_map, opts)
+  end
+
+  @doc """
+  Signals that a collection changed, without saying how.
+
+  Patches `nudges.<key>` with a fresh integer. Tabs watching that signal
+  (see `Dstar.Actions.on_nudge/2`) re-run their own load action, which
+  carries *their* current filter/sort/page signals — so every tab gets a
+  view correct for that tab. This is the default for any list that is
+  filtered, sorted or paginated; the stream is one-way and cannot learn a
+  tab's view state after connect. See the
+  [Live collections](live-collections.html) guide.
+
+  The value is `System.unique_integer([:positive, :monotonic])`. The client
+  only fires its handler when a signal's value actually *changes*, so
+  re-sending a constant would be a silent no-op.
+
+  `key` is a single signal path segment: `~r/^[a-zA-Z0-9_]+$/`.
+
+  ## Example
+
+      def handle_info({:posts_changed, _}, conn), do: nudge(conn, "posts")
+
+  """
+  @spec nudge(Plug.Conn.t(), String.t() | atom(), keyword()) :: Plug.Conn.t()
+  def nudge(conn, key, opts \\ []) do
+    key = nudge_key!(key)
+    patch(conn, %{nudges: %{key => System.unique_integer([:positive, :monotonic])}}, opts)
+  end
+
+  @doc false
+  # Shared by Dstar.Actions.on_nudge/2 so both halves reject the same keys.
+  def nudge_key!(key) when is_atom(key), do: nudge_key!(Atom.to_string(key))
+
+  def nudge_key!(key) when is_binary(key) do
+    unless Regex.match?(@nudge_key_format, key) do
+      raise ArgumentError,
+            "nudge key must be a single signal path segment matching " <>
+              "#{inspect(@nudge_key_format)}, got: #{inspect(key)}"
+    end
+
+    key
   end
 
   @doc """

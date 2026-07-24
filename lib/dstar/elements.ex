@@ -124,6 +124,47 @@ defmodule Dstar.Elements do
   end
 
   @doc """
+  Appends `html` as the last child of `container`.
+
+  The fast path for create-events on a **plain, unfiltered feed**. If the
+  list is filtered, sorted or paginated, the stream cannot know this tab's
+  view state — use `Dstar.Signals.nudge/3` instead. See the
+  [Live collections](live-collections.html) guide.
+
+  ## Example
+
+      conn |> Dstar.Elements.append(post_row(%{post: post}), "#posts")
+
+  """
+  @spec append(Plug.Conn.t(), String.t() | Phoenix.HTML.safe(), String.t(), keyword()) ::
+          Plug.Conn.t()
+  def append(conn, html, container, opts \\ []) when is_binary(container) do
+    patch(conn, html, Keyword.merge([selector: container, mode: :append], opts))
+  end
+
+  @doc """
+  Morphs the element whose DOM `id` matches the root element of `html`.
+
+  Sends no selector, so Datastar targets by id.
+
+  > #### Dropped when absent {: .warning}
+  >
+  > If the tab has no element with that id, Datastar logs
+  > `PatchElementsNoTargetsFound` and drops the patch — a row this tab never
+  > rendered stays absent. That is fine for a plain feed; when it is not
+  > (filtered, sorted or paginated lists), use `Dstar.Signals.nudge/3`.
+
+  ## Example
+
+      conn |> Dstar.Elements.upsert(post_row(%{post: post}))
+
+  """
+  @spec upsert(Plug.Conn.t(), String.t() | Phoenix.HTML.safe(), keyword()) :: Plug.Conn.t()
+  def upsert(conn, html, opts \\ []) do
+    patch(conn, html, opts)
+  end
+
+  @doc """
   Formats an element patch as an SSE event string (for stateless responses).
 
   ## Example

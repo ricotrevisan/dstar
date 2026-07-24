@@ -107,6 +107,40 @@ defmodule Dstar.Actions do
     post(module, event_name, opts)
   end
 
+  # ── Nudges ───────────────────────────────────────────────────────────
+
+  @nudge_attr "data-on-signal-patch"
+  @nudge_filter_attr "data-on-signal-patch-filter"
+
+  @doc """
+  Runs `action` whenever `Dstar.Signals.nudge/3` bumps `key`.
+
+  Returns an attribute map for HEEx spread:
+
+      <div id="posts" {on_nudge("posts", event("reload"))}>
+
+  Unlike `data-effect`, this does not fire on page init — only when that
+  one nudge changes. See the [Live collections](live-collections.html) guide.
+
+  ## Examples
+
+      iex> Dstar.Actions.on_nudge("posts", "@post('/reload')")
+      %{
+        "data-on-signal-patch" => "@post('/reload')",
+        "data-on-signal-patch-filter" => ~S({"include":"^nudges\\\\.posts$"})
+      }
+
+  """
+  @spec on_nudge(String.t() | atom(), String.t()) :: %{String.t() => String.t()}
+  def on_nudge(key, action) when is_binary(action) do
+    key = Dstar.Signals.nudge_key!(key)
+
+    %{
+      @nudge_attr => action,
+      @nudge_filter_attr => Jason.encode!(%{include: "^nudges\\.#{key}$"})
+    }
+  end
+
   # ── Private ──────────────────────────────────────────────────────────
 
   defp action(verb, module, event_name, opts) do

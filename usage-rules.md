@@ -186,6 +186,16 @@ Client reconnection:
      data-on:online__window="@post('/stream', {retryMaxCount: Infinity})">
 ```
 
+## Live Collections
+
+Keeping a list current in every open tab? The stream is one-way and cannot
+learn a tab's filter/sort/page after connect, so blindly appending or morphing
+rows silently corrupts any non-plain view. **Default to the nudge:**
+`nudge(conn, "posts")` bumps a signal, each tab re-runs its own load action
+with its own signals. Row mutation (`append_elements`, `upsert_elements`,
+`remove_elements`) is the fast path for plain feeds only. Full pattern:
+`usage-rules/live-collections.md`.
+
 ## JavaScript Islands
 
 Embedding a stateful, JS-managed-DOM component (rich-text editor, map, chart,

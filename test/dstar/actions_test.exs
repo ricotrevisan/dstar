@@ -88,4 +88,33 @@ defmodule Dstar.ActionsTest do
                Actions.post(MyApp.CounterView, "save", prefix: "/ws")
     end
   end
+
+  describe "on_nudge/2" do
+    test "returns the Datastar attribute pair for a filtered signal-patch listener" do
+      # Attribute names verified against the Datastar v1 bundle: the plugin is
+      # registered as "on-signal-patch" and the filter is a sibling attribute.
+      assert Actions.on_nudge("posts", "@post('/reload')") == %{
+               "data-on-signal-patch" => "@post('/reload')",
+               "data-on-signal-patch-filter" => ~S({"include":"^nudges\\.posts$"})
+             }
+    end
+
+    test "emits a JSON filter so it needs no eval under a strict CSP" do
+      %{"data-on-signal-patch-filter" => filter} = Actions.on_nudge("posts", "@post('/x')")
+
+      assert Jason.decode!(filter) == %{"include" => "^nudges\\.posts$"}
+    end
+
+    test "accepts an atom key" do
+      assert Actions.on_nudge(:posts, "@post('/x')") == Actions.on_nudge("posts", "@post('/x')")
+    end
+
+    test "raises when the key is not a bare signal path segment" do
+      for bad <- ["", "posts.recent", "posts-recent", "a b", "$posts"] do
+        assert_raise ArgumentError, ~r/nudge key/, fn ->
+          Actions.on_nudge(bad, "@post('/x')")
+        end
+      end
+    end
+  end
 end

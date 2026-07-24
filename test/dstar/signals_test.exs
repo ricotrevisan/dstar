@@ -182,4 +182,48 @@ defmodule Dstar.SignalsTest do
       end
     end
   end
+
+  describe "nudge/3" do
+    test "patches an integer under nudges.<key>" do
+      conn = Signals.nudge(chunked_conn(), "posts")
+
+      assert %{"nudges" => %{"posts" => value}} = Dstar.Test.patched_signals(conn)
+      assert is_integer(value)
+    end
+
+    test "sends a different value on every call" do
+      # The client only fires data-on-signal-patch when a value actually
+      # changes, so two nudges patching the same number would be one nudge.
+      conn = chunked_conn() |> Signals.nudge("posts") |> Signals.nudge("posts")
+
+      values =
+        conn
+        |> Dstar.Test.sse_events()
+        |> Enum.flat_map(& &1.data)
+        |> Enum.map(fn "signals " <> json -> get_in(Jason.decode!(json), ["nudges", "posts"]) end)
+
+      assert [first, second] = values
+      assert first != second
+    end
+
+    test "accepts an atom key" do
+      conn = Signals.nudge(chunked_conn(), :posts)
+
+      assert %{"nudges" => %{"posts" => _}} = Dstar.Test.patched_signals(conn)
+    end
+
+    test "passes options through to patch/3" do
+      conn = Signals.nudge(chunked_conn(), "posts", event_id: "e1")
+
+      assert conn.resp_body =~ "id: e1\n"
+    end
+
+    test "raises when the key is not a bare signal path segment" do
+      for bad <- ["", "posts.recent", "posts-recent", "a b", "$posts"] do
+        assert_raise ArgumentError, ~r/nudge key/, fn ->
+          Signals.nudge(chunked_conn(), bad)
+        end
+      end
+    end
+  end
 end
