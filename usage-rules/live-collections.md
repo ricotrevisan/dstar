@@ -106,6 +106,16 @@ def handle_event(conn, "reload", signals) do
 end
 ```
 
+Signals arrive as the client holds them, which is not always what you'd
+guess: **reading an unset signal in any Datastar expression creates it as an
+empty string**, so `data-text="$page || 1"` makes the tab send `page: ""`
+upward, not `nil`. `signals["page"] || 1` then yields `""`. Match on the type
+you need rather than relying on `||`:
+
+```elixir
+page = if is_number(signals["page"]), do: signals["page"], else: 1
+```
+
 **3. Nudge from the stream** when the data changes:
 
 ```elixir
