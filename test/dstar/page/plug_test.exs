@@ -289,8 +289,9 @@ defmodule Dstar.Page.PlugTest do
     # a Bandit keep-alive connection process is reused for the next request.
     # Running it in a Task would let the process death clean the Registry up
     # and hide the leak entirely.
-    defp run_stream(page, tab_id) do
+    defp run_stream(page, tab_id, opts \\ []) do
       parent = self()
+      trap_exits? = Keyword.get(opts, :trap_exits, false)
 
       conn =
         conn(:post, "/keyed")
@@ -299,6 +300,9 @@ defmodule Dstar.Page.PlugTest do
 
       pid =
         spawn(fn ->
+          # Bandit connection processes trap exits; that is what turns the
+          # registry's :replaced signal into a message instead of a kill.
+          if trap_exits?, do: Process.flag(:trap_exit, true)
           returned = PagePlug.call(conn, PagePlug.init({:stream, page}))
           send(parent, {:loop_returned, returned})
           Process.sleep(:infinity)
@@ -333,6 +337,33 @@ defmodule Dstar.Page.PlugTest do
       assert_receive {:loop_returned, _conn}, 1_000
 
       Process.exit(pid, :kill)
+    end
+
+    test "a takeover by a newer stream halts and tears down the old one (#17)" do
+      # End to end: the old stream traps exits like a real connection
+      # process, so the registry's :replaced signal lands as a message.
+      # Without the library handling it, this stream would log an unhandled
+      # message and keep running as a zombie holding the key.
+      pid = run_stream(DisconnectPage, "tab-takeover", trap_exits: true)
+      parent = self()
+
+      spawn(fn ->
+        StreamRegistry.replace_and_register({:teardown_scope, "tab-takeover"})
+        send(parent, {:took_over, self()})
+        Process.sleep(:infinity)
+      end)
+
+      assert_receive {:disconnected, ^pid}, 2_000
+      assert_receive {:loop_returned, _conn}, 1_000
+      assert_receive {:took_over, new_pid}, 1_000
+
+      # Graceful: the old process released the key and was left alive,
+      # rather than being killed mid-request.
+      assert Process.alive?(pid)
+      assert [{^new_pid, _}] = Registry.lookup(StreamRegistry, {:teardown_scope, "tab-takeover"})
+
+      Process.exit(pid, :kill)
+      Process.exit(new_pid, :kill)
     end
 
     test "a page without handle_disconnect/1 still tears down" do

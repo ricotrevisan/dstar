@@ -3,9 +3,16 @@ defmodule Dstar.Utility.StreamRegistry do
   Opt-in per-tab stream deduplication.
 
   Tracks active SSE stream processes by a compound key (typically
-  `{user_id, tab_id}`). When a new stream registers with an existing
-  key, the previous process is killed immediately — no waiting for
-  keepalive timeouts.
+  `{user_id, tab_id}`). When a new stream registers with an existing key,
+  the previous stream is ended immediately — no waiting for keepalive
+  timeouts.
+
+  "Ended" rather than "killed": the previous holder is signalled with
+  `Process.exit(pid, :replaced)`, which a `Dstar.Page` loop handles by
+  halting and unregistering (its connection process survives to serve
+  other requests). A holder that ignores the signal and still owns the key
+  when the grace window closes is killed outright. Either way the handover
+  is bounded — it happens inside a request.
 
   ## Problem
 
@@ -44,20 +51,30 @@ defmodule Dstar.Utility.StreamRegistry do
       def stream(conn, _params) do
         scope = conn.assigns.current_scope
 
-        # Kills any previous stream for this user+tab, then starts SSE
+        # Ends any previous stream for this user+tab, then starts SSE
         conn = Dstar.start_stream(conn, scope.user.id)
 
         loop(conn, state)
       end
 
-  If no `tabId` signal is present in the request, falls back to
-  `Dstar.start/1` without deduplication — so existing streams
-  keep working while you roll out the client-side signal.
+  If the request carries no usable `tabId`, falls back to `Dstar.start/1`
+  without deduplication — so existing streams keep working while you roll
+  out the client-side signal. The signal is client-supplied and validated;
+  see `tab_id/1`.
   """
+
+  require Logger
 
   @registry __MODULE__
   @signal_key "tabId"
   @max_tab_id_bytes 64
+
+  # A takeover happens inside a request, so the whole handover is bounded:
+  # @grace_ms for the holder to let go, then @kill_ms for the kill to land.
+  @poll_ms 10
+  @grace_ms 500
+  @kill_ms 500
+  @register_attempts 5
 
   @doc false
   def child_spec(_opts) do
@@ -67,9 +84,9 @@ defmodule Dstar.Utility.StreamRegistry do
   @doc """
   Starts an SSE stream with per-tab deduplication.
 
-  Reads `tabId` from the request signals, kills any previous stream
-  process registered under `{scope_key, tab_id}`, registers the
-  current process, and calls `Dstar.start/1`.
+  Reads `tabId` from the request signals, ends any previous stream
+  registered under `{scope_key, tab_id}`, registers the current process,
+  and calls `Dstar.start/1`.
 
   If the request carries no usable `tabId` (see `tab_id/1` — the signal
   is client-supplied and validated), falls back to `Dstar.start/1`
@@ -85,7 +102,16 @@ defmodule Dstar.Utility.StreamRegistry do
   @spec start_stream(Plug.Conn.t(), term()) :: Plug.Conn.t()
   def start_stream(conn, scope_key) do
     if tab_id = tab_id(conn) do
-      replace_and_register({scope_key, tab_id})
+      case replace_and_register({scope_key, tab_id}) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Dstar.Utility.StreamRegistry: could not claim #{inspect({scope_key, tab_id})} " <>
+              "(#{inspect(reason)}) — this stream runs without deduplication"
+          )
+      end
     end
 
     Dstar.start(conn)
@@ -146,29 +172,91 @@ defmodule Dstar.Utility.StreamRegistry do
   Replaces any previous process registered under `key` and registers
   the current process.
 
-  Kills the previous holder with `Process.exit(pid, :replaced)` and
-  waits for the registration to clear before registering the caller.
-  This avoids a race where `Registry.register/3` fails because the
-  exited process hasn't been cleaned up yet.
+  Signals the previous holder with `Process.exit(pid, :replaced)` and
+  waits for it to let go of the key before registering the caller. This
+  avoids a race where `Registry.register/3` fails because the previous
+  holder hasn't been cleaned up yet.
+
+  The signal alone is not enough: Bandit connection processes trap exits,
+  so `:replaced` arrives as an ordinary `{:EXIT, _, :replaced}` message.
+  `Dstar.Page` halts its loop on that message and unregisters, which is
+  the graceful path. A holder still clinging to the key when the grace
+  window closes is killed outright — but a holder that released the key
+  and stayed alive is left alone, since under keep-alive it may already be
+  serving an unrelated request.
+
+  Returns `{:error, reason}` if the key could not be claimed.
   """
-  @spec replace_and_register(term()) :: :ok
+  @spec replace_and_register(term()) :: :ok | {:error, term()}
   def replace_and_register(key) do
     case Registry.lookup(@registry, key) do
-      [{pid, _}] when pid != self() ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :replaced)
+      [{pid, _}] when pid != self() -> replace(key, pid)
+      _ -> :ok
+    end
+
+    register(key, @register_attempts)
+  end
+
+  defp replace(key, pid) do
+    ref = Process.monitor(pid)
+    Process.exit(pid, :replaced)
+
+    case await_release(key, pid, ref, deadline(@grace_ms)) do
+      :released ->
+        Process.demonitor(ref, [:flush])
+        :ok
+
+      :timeout ->
+        Process.exit(pid, :kill)
 
         receive do
           {:DOWN, ^ref, :process, ^pid, _} -> :ok
         after
-          5_000 -> :ok
+          @kill_ms -> Process.demonitor(ref, [:flush])
         end
 
-      _ ->
         :ok
     end
+  end
 
-    Registry.register(@registry, key, nil)
-    :ok
+  # Either the holder dies or it releases the key and lives on — the
+  # library loop does the latter, so waiting only on :DOWN would stall for
+  # the full grace window on every ordinary takeover.
+  defp await_release(key, pid, ref, deadline) do
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _} -> :released
+    after
+      @poll_ms ->
+        cond do
+          not holds_key?(key, pid) -> :released
+          System.monotonic_time(:millisecond) >= deadline -> :timeout
+          true -> await_release(key, pid, ref, deadline)
+        end
+    end
+  end
+
+  defp holds_key?(key, pid) do
+    match?([{^pid, _}], Registry.lookup(@registry, key))
+  end
+
+  defp deadline(ms), do: System.monotonic_time(:millisecond) + ms
+
+  # Registry clears a dead holder's entry via its own monitor, asynchronously,
+  # so the key can still be taken for a moment after the holder is gone.
+  defp register(key, attempts) do
+    case Registry.register(@registry, key, nil) do
+      {:ok, _} ->
+        :ok
+
+      {:error, {:already_registered, pid}} when pid == self() ->
+        :ok
+
+      {:error, {:already_registered, _}} when attempts > 1 ->
+        Process.sleep(@poll_ms)
+        register(key, attempts - 1)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 end

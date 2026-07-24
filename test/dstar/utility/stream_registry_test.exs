@@ -68,6 +68,91 @@ defmodule Dstar.Utility.StreamRegistryTest do
     assert Process.alive?(self())
   end
 
+  describe "replace_and_register/1 against a process that traps exits (#17)" do
+    alias Dstar.Utility.StreamRegistry
+
+    # Every Thousand Island handler — so every Bandit connection process —
+    # calls Process.flag(:trap_exit, true), which turns Process.exit(pid,
+    # :replaced) into an ordinary message. The pre-existing tests spawn
+    # plain processes, so they never exercised the case that actually ships.
+    defp spawn_trapping_holder(key) do
+      test = self()
+
+      pid =
+        spawn(fn ->
+          Process.flag(:trap_exit, true)
+          StreamRegistry.replace_and_register(key)
+          send(test, :registered)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive :registered, 1_000
+      pid
+    end
+
+    test "the previous holder is replaced even though it ignores the signal" do
+      key = {make_ref(), make_ref()}
+      pid = spawn_trapping_holder(key)
+      ref = Process.monitor(pid)
+
+      StreamRegistry.replace_and_register(key)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 2_000
+      assert [{holder, _}] = Registry.lookup(StreamRegistry, key)
+      assert holder == self()
+    end
+
+    test "the takeover does not stall the request for seconds" do
+      key = {make_ref(), make_ref()}
+      spawn_trapping_holder(key)
+
+      {micros, _} = :timer.tc(fn -> StreamRegistry.replace_and_register(key) end)
+
+      assert micros < 2_000_000, "takeover took #{div(micros, 1000)}ms"
+    end
+
+    test "a holder that releases the key itself is left alive" do
+      # What the library loop does: handle {:EXIT, _, :replaced}, unregister,
+      # then carry on living as a keep-alive connection process. Killing it
+      # here would take down a process serving an unrelated request.
+      key = {make_ref(), make_ref()}
+      test = self()
+
+      pid =
+        spawn(fn ->
+          Process.flag(:trap_exit, true)
+          StreamRegistry.replace_and_register(key)
+          send(test, :registered)
+
+          receive do
+            {:EXIT, _, :replaced} ->
+              StreamRegistry.unregister_self()
+              send(test, :released)
+              Process.sleep(:infinity)
+          end
+        end)
+
+      assert_receive :registered, 1_000
+
+      StreamRegistry.replace_and_register(key)
+
+      assert_receive :released, 1_000
+      assert Process.alive?(pid)
+      assert [{holder, _}] = Registry.lookup(StreamRegistry, key)
+      assert holder == self()
+
+      Process.exit(pid, :kill)
+    end
+
+    test "reports failure instead of returning a hardcoded :ok" do
+      key = {make_ref(), make_ref()}
+
+      assert :ok = StreamRegistry.replace_and_register(key)
+      # Same process, same key — idempotent, not an error.
+      assert :ok = StreamRegistry.replace_and_register(key)
+    end
+  end
+
   describe "start_stream/2 tabId validation" do
     import Plug.Test
 

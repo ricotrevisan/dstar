@@ -146,6 +146,15 @@ if Code.ensure_loaded?(Phoenix.Controller) do
         # send path. The guard skips them so they stay in the mailbox —
         # consuming them here would break flow control and stall the
         # stream once the send window drains.
+        # A newer stream for the same `stream_key/1` is taking over. Bandit
+        # connection processes trap exits, so `Dstar.Utility.StreamRegistry`'s
+        # `Process.exit(pid, :replaced)` lands here as a message rather than
+        # killing us — halting is what makes the takeover take effect. Without
+        # this the old stream survives as a zombie holding the registry key,
+        # and every page would have to write this clause itself.
+        {:EXIT, _pid, :replaced} ->
+          teardown(conn, page)
+
         msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
           case dispatch_info(page, msg, conn) do
             {:halt, conn} -> teardown(conn, page)
