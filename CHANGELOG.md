@@ -36,6 +36,15 @@
 
 ### Added
 
+- **`handle_disconnect/1`** — optional `Dstar.Page` callback, run on every
+  exit from the receive loop, for releasing what `handle_connect/2`
+  acquired. A page's own `{:EXIT, _, :replaced}` clause still runs on a
+  takeover, so existing cleanup code is unaffected.
+- **`Dstar.Utility.StreamRegistry.tab_id/1`** — the validated `tabId`, so
+  apps driving a hand-rolled loop can rebuild the registry key.
+- **`Dstar.Utility.StreamRegistry.unregister_self/0`** — releases every key
+  the calling process holds; a no-op when the opt-in registry is not running.
+
 - **Live collections.** Helpers for keeping a list current in every open tab,
   plus a [usage-rules topic](usage-rules/live-collections.md) documenting the
   blind-stream trap.
