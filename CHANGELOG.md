@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Stream takeover did nothing on the default stack** (#17). Bandit
+  connection processes trap exits, so `StreamRegistry`'s
+  `Process.exit(pid, :replaced)` arrived as a message instead of killing
+  the old stream: dedup silently did not happen, every navigation stalled
+  5 seconds, and the registry key stayed owned by a zombie. The library
+  loop now halts on `{:EXIT, _, :replaced}`, `replace_and_register/1`
+  waits for the key to be *released* (killing only a holder that ignores
+  the signal), the `Registry.register/3` result is no longer discarded,
+  and the handover is bounded at 1s instead of 5s.
+- **Stream state outlived the stream** (#18). `Dstar.Page.Plug.loop/3` did
+  no teardown, so on HTTP/1.1 keep-alive — where the connection process
+  survives the stream — registry entries and subscriptions leaked onto a
+  process serving unrelated requests. Every exit path now unregisters from
+  `StreamRegistry` and calls the new optional `handle_disconnect/1`.
+- **`tabId` was registered unvalidated** (#19). Any JSON value the client
+  sent became a Registry key; `""` collided every such tab onto one key.
+  Now required to be a 1..64-byte non-blank binary, exposed as
+  `StreamRegistry.tab_id/1`.
+
+### Documentation
+
+- **`data-signals:tabId` never produced a `tabId` signal** (#20). HTML
+  lowercases attribute names and Datastar camelizes on hyphens, so the
+  documented setup silently disabled dedup. Corrected to `tab-id`, with
+  the general kebab-case rule documented for all keyed attributes.
+- **`retryMaxCount` cannot bound a reconnect loop** (#21). It counts
+  consecutive *connection failures* and resets on every 200; only
+  `retryMaxCount: 0` stops a reconnect cycle, which matters when
+  auto-reconnect is combined with stream dedup.
+
 ### Added
 
 - **Live collections.** Helpers for keeping a list current in every open tab,
