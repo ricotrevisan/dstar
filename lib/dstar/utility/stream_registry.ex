@@ -122,6 +122,27 @@ defmodule Dstar.Utility.StreamRegistry do
   end
 
   @doc """
+  Releases every key this process holds in the registry.
+
+  `Dstar.Page` calls this when the receive loop ends, so pages need no
+  bookkeeping. Hand-rolled stream loops should call it on every exit path:
+  the entry is otherwise owned by a connection process that, under
+  HTTP/1.1 keep-alive, lives on to serve unrelated requests.
+
+  A no-op when the registry is not running (it is opt-in).
+  """
+  @spec unregister_self() :: :ok
+  def unregister_self do
+    if Process.whereis(@registry) do
+      for key <- Registry.keys(@registry, self()) do
+        Registry.unregister(@registry, key)
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
   Replaces any previous process registered under `key` and registers
   the current process.
 

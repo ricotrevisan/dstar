@@ -233,6 +233,122 @@ defmodule Dstar.Page.PlugTest do
     end
   end
 
+  describe "stream teardown (#18)" do
+    alias Dstar.Utility.StreamRegistry
+
+    defmodule TeardownPage do
+      use Dstar.Page, idle_check: 50
+
+      def render(assigns), do: ~H'<div id="t">teardown</div>'
+
+      def stream_key(_conn), do: :teardown_scope
+
+      def handle_connect(conn, _params) do
+        send(:dstar_plug_stream_test, {:connected, self()})
+        conn
+      end
+
+      def handle_info(:halt_now, conn), do: {:halt, conn}
+    end
+
+    defmodule DisconnectPage do
+      use Dstar.Page, idle_check: 50
+
+      def render(assigns), do: ~H'<div id="d">disconnect</div>'
+
+      def stream_key(_conn), do: :teardown_scope
+
+      def handle_connect(conn, _params) do
+        send(:dstar_plug_stream_test, {:connected, self()})
+        conn
+      end
+
+      def handle_disconnect(conn) do
+        send(:dstar_plug_stream_test, {:disconnected, self()})
+        conn
+      end
+
+      def handle_info(:halt_now, conn), do: {:halt, conn}
+    end
+
+    setup do
+      Process.register(self(), :dstar_plug_stream_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_stream_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    # The stream must be driven by a process that OUTLIVES the loop, the way
+    # a Bandit keep-alive connection process is reused for the next request.
+    # Running it in a Task would let the process death clean the Registry up
+    # and hide the leak entirely.
+    defp run_stream(page, tab_id) do
+      parent = self()
+
+      conn =
+        conn(:post, "/keyed")
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Map.put(:body_params, %{"tabId" => tab_id})
+
+      pid =
+        spawn(fn ->
+          returned = PagePlug.call(conn, PagePlug.init({:stream, page}))
+          send(parent, {:loop_returned, returned})
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive {:connected, ^pid}, 1_000
+      pid
+    end
+
+    test "releases its registry key when the loop halts" do
+      pid = run_stream(TeardownPage, "tab-teardown-1")
+
+      assert [{^pid, _}] = Registry.lookup(StreamRegistry, {:teardown_scope, "tab-teardown-1"})
+
+      send(pid, :halt_now)
+      assert_receive {:loop_returned, _conn}, 1_000
+
+      # The connection process is still alive — as it would be between
+      # keep-alive requests — so nothing but the loop can have released this.
+      assert Process.alive?(pid)
+      assert Registry.lookup(StreamRegistry, {:teardown_scope, "tab-teardown-1"}) == []
+
+      Process.exit(pid, :kill)
+    end
+
+    test "calls handle_disconnect/1 when the loop halts" do
+      pid = run_stream(DisconnectPage, "tab-teardown-2")
+
+      send(pid, :halt_now)
+
+      assert_receive {:disconnected, ^pid}, 1_000
+      assert_receive {:loop_returned, _conn}, 1_000
+
+      Process.exit(pid, :kill)
+    end
+
+    test "a page without handle_disconnect/1 still tears down" do
+      assert Code.ensure_loaded?(TeardownPage)
+      refute function_exported?(TeardownPage, :handle_disconnect, 1)
+
+      pid = run_stream(TeardownPage, "tab-teardown-3")
+      send(pid, :halt_now)
+
+      assert_receive {:loop_returned, conn}, 1_000
+      assert conn.state == :chunked
+
+      Process.exit(pid, :kill)
+    end
+  end
+
   describe "page action (GET)" do
     test "mounts and renders HTML 200" do
       conn = conn(:get, "/counter?start=5")

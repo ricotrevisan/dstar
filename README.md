@@ -141,9 +141,23 @@ Declare how to subscribe; the library owns the receive loop:
 ```
 
 The loop checks connection liveness every 30s (tune with
-`use Dstar.Page, idle_check: 10_000`), survives stray messages, and
-cleans up when the client disconnects. Add a `stream_key/1` callback to
-enable per-tab stream deduplication via `Dstar.Utility.StreamRegistry`.
+`use Dstar.Page, idle_check: 10_000`) and survives stray messages. Add a
+`stream_key/1` callback to enable per-tab stream deduplication via
+`Dstar.Utility.StreamRegistry`.
+
+When the loop ends — a `{:halt, conn}`, a dead client, or a takeover by a
+newer stream for the same key — the library unregisters the stream from
+`Dstar.Utility.StreamRegistry`. App-owned state (PubSub subscriptions,
+presence, caches) is yours to release in an optional `handle_disconnect/1`:
+
+```elixir
+def handle_disconnect(conn) do
+  Phoenix.PubSub.unsubscribe(MyApp.PubSub, "room:#{conn.assigns.room_id}")
+end
+```
+
+This matters on HTTP/1.1 keep-alive, where the connection process outlives
+the stream and goes on to serve unrelated requests.
 
 ### Shared components
 
@@ -665,7 +679,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 
 | Module | Functions |
 |--------|-----------|
-| `Dstar.Page` | behaviour + `use` macro: `mount/2`, `render/1`, `handle_event/3`, `handle_connect/2`, `handle_info/2`, `stream_key/1` |
+| `Dstar.Page` | behaviour + `use` macro: `mount/2`, `render/1`, `handle_event/3`, `handle_connect/2`, `handle_info/2`, `stream_key/1`, `handle_disconnect/1` |
 | `Dstar.Page.Plug` | request driver: handles page, event, and stream actions |
 | `Dstar.Component` | shared UI with colocated event handlers |
 | `Dstar.Router` | `dstar/2` (page routes), `dstar_components/2` (dispatch route) |

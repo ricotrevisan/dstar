@@ -56,7 +56,27 @@ defmodule Dstar.Page do
   @doc "If defined, the stream opens via `Dstar.start_stream/2` keyed on the result. Optional."
   @callback stream_key(Plug.Conn.t()) :: term()
 
-  @optional_callbacks mount: 2, handle_event: 3, handle_connect: 2, handle_info: 2, stream_key: 1
+  @doc """
+  Stream close: release what `handle_connect/2` acquired — unsubscribe,
+  untrack presence, drop caches. Optional.
+
+  Runs on every exit from the receive loop: a `{:halt, conn}` from
+  `handle_info/2`, a dead client, or a takeover by a newer stream for the
+  same `stream_key/1`. The library already unregisters the stream from
+  `Dstar.Utility.StreamRegistry` for you; this is for app-owned state.
+
+  The client is usually gone by this point, so treat the conn as
+  write-only-on-a-best-effort basis. A crash here is logged and swallowed —
+  teardown continues either way. The return value is ignored.
+  """
+  @callback handle_disconnect(Plug.Conn.t()) :: any()
+
+  @optional_callbacks mount: 2,
+                      handle_event: 3,
+                      handle_connect: 2,
+                      handle_info: 2,
+                      stream_key: 1,
+                      handle_disconnect: 1
 
   @default_idle_check 30_000
 

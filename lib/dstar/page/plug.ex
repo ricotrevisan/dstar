@@ -148,16 +148,35 @@ if Code.ensure_loaded?(Phoenix.Controller) do
         # stream once the send window drains.
         msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
           case dispatch_info(page, msg, conn) do
-            {:halt, conn} -> conn
+            {:halt, conn} -> teardown(conn, page)
             conn -> loop(conn, page, idle_check)
           end
       after
         idle_check ->
           case Dstar.check_connection(conn) do
             {:ok, conn} -> loop(conn, page, idle_check)
-            {:error, conn} -> conn
+            {:error, conn} -> teardown(conn, page)
           end
       end
+    end
+
+    # Registry entries and PubSub subscriptions are released when the owning
+    # process dies. Under HTTP/1.1 keep-alive the connection process does NOT
+    # die when the stream ends — it is reused for the next request on that
+    # socket — so without this everything the stream registered stays
+    # registered, owned by a process now serving unrelated traffic.
+    defp teardown(conn, page) do
+      Dstar.Utility.StreamRegistry.unregister_self()
+
+      if exported?(page, :handle_disconnect, 1) do
+        try do
+          page.handle_disconnect(conn)
+        rescue
+          exception -> log_crash(page, :handle_disconnect, exception, __STACKTRACE__)
+        end
+      end
+
+      conn
     end
 
     # function_exported?/3 alone returns false for modules the code server
