@@ -366,6 +366,54 @@ defmodule Dstar.Page.PlugTest do
       Process.exit(new_pid, :kill)
     end
 
+    defmodule OwnReplacedClausePage do
+      use Dstar.Page, idle_check: 50
+
+      def render(assigns), do: ~H'<div id="o">own clause</div>'
+
+      def stream_key(_conn), do: :teardown_scope
+
+      def handle_connect(conn, _params) do
+        send(:dstar_plug_stream_test, {:connected, self()})
+        conn
+      end
+
+      # Apps wrote this clause before the library handled the signal — it
+      # must keep running, or their cleanup silently stops happening.
+      def handle_info({:EXIT, _pid, :replaced}, conn) do
+        send(:dstar_plug_stream_test, {:own_clause_ran, self()})
+        {:halt, conn}
+      end
+
+      def handle_info(:halt_now, conn), do: {:halt, conn}
+    end
+
+    test "a page's own {:EXIT, _, :replaced} clause still runs on takeover" do
+      pid = run_stream(OwnReplacedClausePage, "tab-own-clause", trap_exits: true)
+
+      send(pid, {:EXIT, self(), :replaced})
+
+      assert_receive {:own_clause_ran, ^pid}, 1_000
+      assert_receive {:loop_returned, _conn}, 1_000
+
+      Process.exit(pid, :kill)
+    end
+
+    test "a takeover on a page with no such clause logs no unhandled-message warning" do
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          pid = run_stream(DisconnectPage, "tab-quiet", trap_exits: true)
+          send(pid, {:EXIT, self(), :replaced})
+          assert_receive {:disconnected, ^pid}, 1_000
+          assert_receive {:loop_returned, _conn}, 1_000
+          Process.exit(pid, :kill)
+        end)
+
+      refute log =~ "unhandled message"
+    end
+
     test "a page without handle_disconnect/1 still tears down" do
       assert Code.ensure_loaded?(TeardownPage)
       refute function_exported?(TeardownPage, :handle_disconnect, 1)

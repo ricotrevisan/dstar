@@ -152,8 +152,15 @@ if Code.ensure_loaded?(Phoenix.Controller) do
         # killing us — halting is what makes the takeover take effect. Without
         # this the old stream survives as a zombie holding the registry key,
         # and every page would have to write this clause itself.
-        {:EXIT, _pid, :replaced} ->
-          teardown(conn, page)
+        #
+        # The page still gets first refusal, because apps wrote this clause
+        # before the library handled the signal and their cleanup must keep
+        # running. Whatever it returns, the stream then ends: a takeover is
+        # not something a page may decline.
+        {:EXIT, _pid, :replaced} = msg ->
+          conn
+          |> offer_replaced(page, msg)
+          |> teardown(page)
 
         msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
           case dispatch_info(page, msg, conn) do
@@ -166,6 +173,20 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             {:ok, conn} -> loop(conn, page, idle_check)
             {:error, conn} -> teardown(conn, page)
           end
+      end
+    end
+
+    # Streaming pages need handle_connect/2 but not handle_info/2, so this
+    # dispatch is speculative on both counts: the callback may not exist, and
+    # if it does it may have no clause for this message. Neither is an error.
+    defp offer_replaced(conn, page, msg) do
+      if exported?(page, :handle_info, 2) do
+        case dispatch_info(page, msg, conn, warn_unhandled: false) do
+          {:halt, conn} -> conn
+          conn -> conn
+        end
+      else
+        conn
       end
     end
 
@@ -198,13 +219,18 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     # A message matching no handle_info/2 clause must not kill the stream.
     # Only a FunctionClauseError raised by the head of the page's own
     # handle_info/2 is absorbed; errors inside a matched clause propagate.
-    defp dispatch_info(page, msg, conn) do
+    defp dispatch_info(page, msg, conn, opts \\ []) do
       page.handle_info(msg, conn)
     rescue
       exception in FunctionClauseError ->
         if exception.module == page and exception.function == :handle_info and
              exception.arity == 2 do
-          Logger.warning("#{inspect(page)} received unhandled message: #{inspect(msg)}")
+          # Library-handled messages are dispatched speculatively, so "the
+          # page has no clause for this" is the expected case, not a warning.
+          if Keyword.get(opts, :warn_unhandled, true) do
+            Logger.warning("#{inspect(page)} received unhandled message: #{inspect(msg)}")
+          end
+
           conn
         else
           log_crash(page, :handle_info, exception, __STACKTRACE__)
