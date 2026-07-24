@@ -67,4 +67,88 @@ defmodule Dstar.Utility.StreamRegistryTest do
 
     assert Process.alive?(self())
   end
+
+  describe "start_stream/2 tabId validation" do
+    import Plug.Test
+
+    alias Dstar.Utility.StreamRegistry
+
+    defp stream_conn(tab_id) do
+      conn(:post, "/stream")
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Map.put(:body_params, %{"tabId" => tab_id})
+    end
+
+    defp registered_keys, do: Registry.keys(StreamRegistry, self())
+
+    test "registers a well-formed tabId under {scope_key, tab_id}" do
+      scope = make_ref()
+      StreamRegistry.start_stream(stream_conn("6f1c9b3e-tab"), scope)
+
+      assert {scope, "6f1c9b3e-tab"} in registered_keys()
+    end
+
+    test "an empty tabId does not claim a key" do
+      # Every tab sending "" would collide on one key and kill each other.
+      scope = make_ref()
+      StreamRegistry.start_stream(stream_conn(""), scope)
+
+      assert registered_keys() == []
+    end
+
+    test "a whitespace-only tabId does not claim a key" do
+      scope = make_ref()
+      StreamRegistry.start_stream(stream_conn("   "), scope)
+
+      assert registered_keys() == []
+    end
+
+    test "non-binary tabIds do not claim a key" do
+      for tab_id <- [42, true, ["a"], %{"a" => 1}, 1.5] do
+        scope = make_ref()
+        StreamRegistry.start_stream(stream_conn(tab_id), scope)
+
+        assert registered_keys() == [], "#{inspect(tab_id)} was accepted as a tabId"
+      end
+    end
+
+    test "an over-long tabId does not claim a key" do
+      scope = make_ref()
+      StreamRegistry.start_stream(stream_conn(String.duplicate("x", 65)), scope)
+
+      assert registered_keys() == []
+    end
+
+    test "a missing tabId falls through to the documented no-dedup path" do
+      scope = make_ref()
+      conn = conn(:post, "/stream") |> Map.put(:body_params, %{})
+
+      conn = StreamRegistry.start_stream(conn, scope)
+
+      assert registered_keys() == []
+      assert conn.state == :chunked
+    end
+  end
+
+  describe "tab_id/1" do
+    import Plug.Test
+
+    alias Dstar.Utility.StreamRegistry
+
+    test "returns the validated tabId so apps can rebuild the registry key" do
+      conn =
+        conn(:post, "/stream")
+        |> Map.put(:body_params, %{"tabId" => "tab-1"})
+
+      assert StreamRegistry.tab_id(conn) == "tab-1"
+    end
+
+    test "returns nil for a tabId the registry would reject" do
+      for bad <- ["", "  ", 42, nil, String.duplicate("x", 65)] do
+        conn = conn(:post, "/stream") |> Map.put(:body_params, %{"tabId" => bad})
+
+        assert StreamRegistry.tab_id(conn) == nil, "#{inspect(bad)} passed validation"
+      end
+    end
+  end
 end

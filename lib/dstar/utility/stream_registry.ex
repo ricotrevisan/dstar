@@ -57,6 +57,7 @@ defmodule Dstar.Utility.StreamRegistry do
 
   @registry __MODULE__
   @signal_key "tabId"
+  @max_tab_id_bytes 64
 
   @doc false
   def child_spec(_opts) do
@@ -70,7 +71,8 @@ defmodule Dstar.Utility.StreamRegistry do
   process registered under `{scope_key, tab_id}`, registers the
   current process, and calls `Dstar.start/1`.
 
-  If no `tabId` signal is present, falls back to `Dstar.start/1`
+  If the request carries no usable `tabId` (see `tab_id/1` — the signal
+  is client-supplied and validated), falls back to `Dstar.start/1`
   without deduplication.
 
   ## Parameters
@@ -82,15 +84,41 @@ defmodule Dstar.Utility.StreamRegistry do
   """
   @spec start_stream(Plug.Conn.t(), term()) :: Plug.Conn.t()
   def start_stream(conn, scope_key) do
-    signals = Dstar.Signals.read(conn)
-    tab_id = signals[@signal_key]
-
-    if tab_id do
-      key = {scope_key, tab_id}
-      replace_and_register(key)
+    if tab_id = tab_id(conn) do
+      replace_and_register({scope_key, tab_id})
     end
 
     Dstar.start(conn)
+  end
+
+  @doc """
+  Returns the request's `tabId` signal if it is usable as a registry key,
+  otherwise `nil`.
+
+  A usable id is a binary of 1..#{@max_tab_id_bytes} bytes that is not
+  entirely whitespace. `tabId` is client-supplied, so everything else is
+  rejected — notably `""`, which would collide every such tab onto one key
+  and make them kill each other in a loop.
+
+  The registry key is `{scope_key, tab_id}` using this exact value (no
+  normalization), so an app driving a hand-rolled stream loop can rebuild
+  the key it needs:
+
+      key = {scope.user.id, Dstar.Utility.StreamRegistry.tab_id(conn)}
+
+  Pages using `Dstar.Page` do not need this — the library unregisters the
+  stream for them when the loop ends.
+  """
+  @spec tab_id(Plug.Conn.t()) :: String.t() | nil
+  def tab_id(conn) do
+    case Dstar.Signals.read(conn)[@signal_key] do
+      tab_id when is_binary(tab_id) ->
+        if byte_size(tab_id) in 1..@max_tab_id_bytes and String.trim(tab_id) != "",
+          do: tab_id
+
+      _ ->
+        nil
+    end
   end
 
   @doc """
