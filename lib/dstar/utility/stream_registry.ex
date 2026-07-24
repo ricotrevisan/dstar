@@ -254,7 +254,8 @@ defmodule Dstar.Utility.StreamRegistry do
 
   # Registry clears a dead holder's entry via its own monitor, asynchronously,
   # so the key can still be taken for a moment after the holder is gone.
-  defp register(key, attempts) do
+  @doc false
+  def register(key, attempts) do
     case Registry.register(@registry, key, nil) do
       {:ok, _} ->
         :ok

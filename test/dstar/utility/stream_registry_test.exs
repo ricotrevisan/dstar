@@ -151,6 +151,29 @@ defmodule Dstar.Utility.StreamRegistryTest do
       # Same process, same key — idempotent, not an error.
       assert :ok = StreamRegistry.replace_and_register(key)
     end
+
+    test "a key held by a live process is reported, not swallowed" do
+      # The #17 bullet "stop discarding the Registry.register/3 result" has no
+      # other coverage: every takeover path ends in success, so a regression to
+      # an unconditional :ok would pass the rest of this suite. Driving the
+      # claim directly is the only way to reach the branch deterministically —
+      # via replace_and_register/1 the holder is always killed first.
+      key = {make_ref(), make_ref()}
+      test = self()
+
+      holder =
+        spawn(fn ->
+          Registry.register(StreamRegistry, key, nil)
+          send(test, :held)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive :held, 1_000
+
+      assert {:error, {:already_registered, ^holder}} = StreamRegistry.register(key, 2)
+
+      Process.exit(holder, :kill)
+    end
   end
 
   describe "start_stream/2 tabId validation" do
