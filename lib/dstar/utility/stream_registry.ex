@@ -191,7 +191,12 @@ defmodule Dstar.Utility.StreamRegistry do
   and stayed alive is left alone, since under keep-alive it may already be
   serving an unrelated request.
 
-  Returns `{:error, reason}` if the key could not be claimed.
+  Returns `{:error, reason}` if the key could not be claimed. This fails
+  *open*: two streams racing for the same key leave one of them running
+  without a registry entry, so nothing can take it over later — it ends
+  only when its client disconnects or the idle check notices. A caller that
+  gets an error must not assume it is deduplicated; `start_stream/2` logs a
+  warning and streams anyway.
   """
   @spec replace_and_register(term()) :: :ok | {:error, term()}
   def replace_and_register(key) do

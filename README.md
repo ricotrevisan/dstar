@@ -534,18 +534,27 @@ roll out the client-side signal.
 
 ### Deduplication vs. auto-reconnect
 
-Do not point auto-reconnect at a deduplicated stream without capping
-retries. Tab A connects, tab B's stream replaces it, A's client sees the
-stream end and reconnects — replacing B, which reconnects, forever.
+A replaced stream that ends **cleanly** — the ordinary HTTP/1.1 takeover,
+where the loop halts and the response terminates properly — does not
+reconnect: the Datastar client only reconnects after a clean end when you
+set `retry: "always"` (the default is `"auto"`).
 
-`retryMaxCount` cannot stop this. It counts *consecutive failures to
-connect*, and the Datastar client resets it (and the backoff interval) on
-every 200, so a loop that succeeds before being ended never accumulates a
-budget. The only value that breaks the cycle is `0`:
+When the takeover ends the stream as a **transport error** instead, the two
+features fight: tab A reconnects, replacing tab B, which reconnects,
+forever. That happens on HTTP/2 (the stream process is killed outright
+rather than halting) and on the registry's kill escalation.
+
+`retryMaxCount` cannot stop that loop. It counts *consecutive failures to
+connect*, and the client resets it — and the backoff interval — on every
+200, so a loop that connects successfully each pass never accumulates a
+budget. Only `0` breaks the cycle:
 
 ```heex
 <div data-init={connect(opts: "{retryMaxCount: 0}")}>
 ```
+
+Note this also disables reconnection after ordinary network blips, so
+apply it to the deduplicated stream, not indiscriminately.
 
 ## SSE Connection Limits & HTTP/2
 

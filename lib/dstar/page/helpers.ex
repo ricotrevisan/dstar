@@ -78,14 +78,21 @@ defmodule Dstar.Page.Helpers do
   > #### retryMaxCount does not bound reconnect cycles {: .warning}
   >
   > It counts *consecutive failures to connect*, and the client resets it —
-  > along with the backoff interval — on every 200. A stream that connects
-  > successfully and is then ended reconnects forever, at full speed, no
-  > matter what finite value you set.
+  > along with the backoff interval — on every 200. So it cannot cap a loop
+  > that reconnects successfully each time round: the budget never
+  > accumulates, whatever finite value you set. Only `retryMaxCount: 0`
+  > stops such a loop.
   >
-  > This bites when auto-reconnect meets `Dstar.Utility.StreamRegistry`
-  > dedup: tab A connects, tab B's stream replaces it, A's client sees the
-  > stream end and reconnects, which replaces B, and so on. The only value
-  > that breaks the cycle is `retryMaxCount: 0` on the deduped stream:
+  > This applies when the stream ends as a **transport error**: an HTTP/2
+  > takeover (the stream process is killed outright rather than halting),
+  > the registry's kill escalation, or a crash. A stream that ends
+  > *cleanly* — the ordinary HTTP/1.1 takeover, where the loop halts and
+  > the response is terminated properly — does not reconnect at all under
+  > the default `retry: "auto"`; reconnecting after a clean end requires
+  > `retry: "always"`.
+  >
+  > If you combine auto-reconnect with `Dstar.Utility.StreamRegistry` dedup
+  > on a stack where takeovers end as errors, cap it:
   >
   >     connect(opts: "{retryMaxCount: 0}")
   """

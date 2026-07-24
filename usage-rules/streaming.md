@@ -53,12 +53,18 @@ end
 
 **`retryMaxCount` cannot bound a reconnect loop.** It counts consecutive
 failures to *connect*, and the client resets it — plus the backoff
-interval — on every 200. A stream that connects and is then terminated
-reconnects forever at full speed, whatever finite value you set.
+interval — on every 200, so a loop that reconnects successfully each pass
+never accumulates a budget. Only `retryMaxCount: 0` stops one.
 
-This is a real hazard with `Dstar.Utility.StreamRegistry` dedup: each
-tab's reconnect replaces the other tab's stream, which reconnects, and
-round it goes. Use `retryMaxCount: 0` on a deduplicated stream.
+This matters when a stream ends as a **transport error** (HTTP/2 takeover,
+a kill, a crash) or when you set `retry: "always"`. A cleanly ended stream
+does not reconnect at all under the default `retry: "auto"` — including
+the ordinary HTTP/1.1 `StreamRegistry` takeover, where the loop halts and
+the response terminates properly.
+
+Where takeovers do end as errors, cap the deduplicated stream with
+`retryMaxCount: 0`, or the two features fight: each tab's reconnect
+replaces the other's stream, and round it goes.
 
 ## No Keepalive Needed
 

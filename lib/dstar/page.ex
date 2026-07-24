@@ -68,6 +68,24 @@ defmodule Dstar.Page do
   The client is usually gone by this point, so treat the conn as
   write-only-on-a-best-effort basis. A crash here is logged and swallowed —
   teardown continues either way. The return value is ignored.
+
+  > #### Best-effort, not guaranteed {: .warning}
+  >
+  > This runs when the *loop* ends, which requires the process to survive
+  > long enough to notice. A takeover that kills the process outright skips
+  > it: only Thousand Island (so Bandit HTTP/1.1) connection processes trap
+  > exits, whereas Bandit's HTTP/2 stream processes and Cowboy request
+  > processes do not, and the registry's escalation kill is untrappable by
+  > design.
+  >
+  > Anything cleaned up by process monitors — `Phoenix.PubSub`
+  > subscriptions, `Phoenix.Presence`, the registry entry itself — is
+  > released regardless. Reserve this callback for state that is *not*
+  > monitor-backed (external caches, rows in another system), and make it
+  > idempotent: on a takeover it can interleave with, or run after, the
+  > replacing stream's `handle_connect/2`, so cleanup keyed on the tab
+  > rather than on this stream can otherwise clobber what the new stream
+  > just wrote.
   """
   @callback handle_disconnect(Plug.Conn.t()) :: any()
 

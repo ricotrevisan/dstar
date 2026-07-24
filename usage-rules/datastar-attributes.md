@@ -719,10 +719,10 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 
 **`retryMaxCount` counts consecutive *connection failures*, not reconnect
 cycles.** The client resets it — and the backoff interval — on every 200,
-so a stream that connects and is then ended will reconnect forever
-regardless of the value. Only `retryMaxCount: 0` stops a reconnect loop.
-This matters when auto-reconnect is combined with stream deduplication:
-each tab's reconnect kills the other's stream, which reconnects, forever.
+so it cannot cap a loop that reconnects successfully each pass; only
+`retryMaxCount: 0` stops one. This applies to streams ending as a
+transport error, or with `retry: "always"`. A cleanly ended stream does
+not reconnect at all under the default `retry: "auto"`.
 
 ---
 

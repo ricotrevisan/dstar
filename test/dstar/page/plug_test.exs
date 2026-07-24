@@ -366,6 +366,26 @@ defmodule Dstar.Page.PlugTest do
       Process.exit(new_pid, :kill)
     end
 
+    defmodule StalePage do
+      use Dstar.Page, idle_check: 50
+
+      def render(assigns), do: ~H'<div id="st">stale</div>'
+
+      def stream_key(_conn), do: :teardown_scope
+
+      def handle_connect(conn, _params) do
+        send(:dstar_plug_stream_test, {:connected, self()})
+        conn
+      end
+
+      def handle_info({:ping, from}, conn) do
+        send(from, :pong)
+        conn
+      end
+
+      def handle_info(:halt_now, conn), do: {:halt, conn}
+    end
+
     defmodule OwnReplacedClausePage do
       use Dstar.Page, idle_check: 50
 
@@ -412,6 +432,41 @@ defmodule Dstar.Page.PlugTest do
         end)
 
       refute log =~ "unhandled message"
+    end
+
+    test "a stale :replaced left in the mailbox does not kill the next stream" do
+      # Keep-alive connection processes are reused across requests, and their
+      # mailbox survives with them. A takeover signal that arrived after the
+      # previous loop stopped receiving is still sitting there — it must not
+      # be mistaken for a takeover of the stream that comes next.
+      parent = self()
+
+      conn =
+        conn(:post, "/keyed")
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Map.put(:body_params, %{"tabId" => "tab-stale"})
+
+      pid =
+        spawn(fn ->
+          Process.flag(:trap_exit, true)
+          # Left over from the previous request on this socket.
+          send(self(), {:EXIT, parent, :replaced})
+
+          returned = PagePlug.call(conn, PagePlug.init({:stream, StalePage}))
+          send(parent, {:loop_returned, returned})
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive {:connected, ^pid}, 1_000
+
+      # A live stream answers; a poisoned one has already torn down.
+      send(pid, {:ping, self()})
+      assert_receive :pong, 1_000
+      refute_received {:loop_returned, _}
+
+      send(pid, :halt_now)
+      assert_receive {:loop_returned, _conn}, 1_000
+      Process.exit(pid, :kill)
     end
 
     test "a page without handle_disconnect/1 still tears down" do

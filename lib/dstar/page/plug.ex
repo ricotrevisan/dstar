@@ -116,6 +116,8 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             Dstar.SSE.start(conn)
           end
 
+        drain_stale_replaced()
+
         conn =
           try do
             page.handle_connect(conn, conn.params)
@@ -173,6 +175,25 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             {:ok, conn} -> loop(conn, page, idle_check)
             {:error, conn} -> teardown(conn, page)
           end
+      end
+    end
+
+    # A keep-alive connection process is reused across requests and keeps its
+    # mailbox. A takeover signal that arrived after the previous loop stopped
+    # receiving is still parked there, and the loop below cannot tell it from
+    # a takeover of *this* stream — it would tear down a fresh stream nobody
+    # replaced, silently.
+    #
+    # Draining here is safe by construction: a `:replaced` meant for this
+    # stream can only be sent by a taker that found this process in the
+    # registry, which cannot happen before the registration just above. A
+    # legitimate signal landing inside the microsecond window between the two
+    # is backstopped by the taker's kill escalation.
+    defp drain_stale_replaced do
+      receive do
+        {:EXIT, _pid, :replaced} -> drain_stale_replaced()
+      after
+        0 -> :ok
       end
     end
 
