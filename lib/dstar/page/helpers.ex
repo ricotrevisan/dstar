@@ -31,7 +31,7 @@ defmodule Dstar.Page.Helpers do
 
   - `:verb` — `:get | :post | :put | :patch | :delete` (default `:post`)
   - `:opts` — raw JS object string appended as the action's options,
-    e.g. `"{retryMaxCount: 5}"`
+    e.g. `"{indicator: 'saving'}"`
   """
   def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
     if String.contains?(name, ["'", "/"]) do
@@ -74,6 +74,20 @@ defmodule Dstar.Page.Helpers do
     (pages whose render depends on them, e.g. `?step=`).
 
   Always emits `@post` — Dstar streams connect over POST.
+
+  > #### retryMaxCount does not bound reconnect cycles {: .warning}
+  >
+  > It counts *consecutive failures to connect*, and the client resets it —
+  > along with the backoff interval — on every 200. A stream that connects
+  > successfully and is then ended reconnects forever, at full speed, no
+  > matter what finite value you set.
+  >
+  > This bites when auto-reconnect meets `Dstar.Utility.StreamRegistry`
+  > dedup: tab A connects, tab B's stream replaces it, A's client sees the
+  > stream end and reconnects, which replaces B, and so on. The only value
+  > that breaks the cycle is `retryMaxCount: 0` on the deduped stream:
+  >
+  >     connect(opts: "{retryMaxCount: 0}")
   """
   def connect(opts \\ []) when is_list(opts) do
     extra = Keyword.get(opts, :opts, "{retryMaxCount: Infinity}")

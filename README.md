@@ -492,11 +492,18 @@ children = [
 ### 2. Add a `tabId` signal to your root layout
 
 ```heex
-<body data-signals:tabId="sessionStorage.getItem('_ds_tab') || (() => { const id = crypto.randomUUID(); sessionStorage.setItem('_ds_tab', id); return id; })()">
+<body data-signals:tab-id="sessionStorage.getItem('_ds_tab') || (() => { const id = crypto.randomUUID(); sessionStorage.setItem('_ds_tab', id); return id; })()">
 ```
 
 `sessionStorage` is per-tab — each tab gets its own UUID that persists
 across navigations but is unique per tab. Multiple tabs work independently.
+
+> **Why `tab-id` and not `tabId`?** HTML lowercases attribute names, so
+> `data-signals:tabId` arrives as `tabid` and creates a signal named
+> `tabid` — which never matches the `tabId` the registry reads, leaving
+> dedup silently disabled. Datastar camelizes on hyphens, so `tab-id`
+> is what produces `tabId`. This applies to every multi-word
+> `data-signals:*` / `data-bind:*` attribute.
 
 > **Why not `_tabId`?** Datastar treats `_`-prefixed signals as client-only
 > and never sends them to the server. The signal needs to reach the backend,
@@ -524,6 +531,21 @@ roll out the client-side signal.
 | User clicks 5 pages in 3s (same tab) | 5 zombie processes doing wasted PubSub work | 1 process per tab, always |
 | 3 tabs open | 3 streams (fine) | 3 streams (unchanged) |
 | 100 users rapid nav | Spikes of zombies doing wasted DB queries | Max 100 processes, zero wasted work |
+
+### Deduplication vs. auto-reconnect
+
+Do not point auto-reconnect at a deduplicated stream without capping
+retries. Tab A connects, tab B's stream replaces it, A's client sees the
+stream end and reconnects — replacing B, which reconnects, forever.
+
+`retryMaxCount` cannot stop this. It counts *consecutive failures to
+connect*, and the Datastar client resets it (and the backoff interval) on
+every 200, so a loop that succeeds before being ended never accumulates a
+budget. The only value that breaks the cycle is `0`:
+
+```heex
+<div data-init={connect(opts: "{retryMaxCount: 0}")}>
+```
 
 ## SSE Connection Limits & HTTP/2
 

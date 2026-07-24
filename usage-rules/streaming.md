@@ -51,6 +51,15 @@ end
 </div>
 ```
 
+**`retryMaxCount` cannot bound a reconnect loop.** It counts consecutive
+failures to *connect*, and the client resets it — plus the backoff
+interval — on every 200. A stream that connects and is then terminated
+reconnects forever at full speed, whatever finite value you set.
+
+This is a real hazard with `Dstar.Utility.StreamRegistry` dedup: each
+tab's reconnect replaces the other tab's stream, which reconnects, and
+round it goes. Use `retryMaxCount: 0` on a deduplicated stream.
+
 ## No Keepalive Needed
 
 SSE connections stay open automatically. No need for manual ping/pong.

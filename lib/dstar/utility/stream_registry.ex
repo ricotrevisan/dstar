@@ -34,10 +34,16 @@ defmodule Dstar.Utility.StreamRegistry do
 
   Then add a `tabId` signal to your root layout:
 
-      <body data-signals:tabId="sessionStorage.getItem('_ds_tab') || (() => { const id = crypto.randomUUID(); sessionStorage.setItem('_ds_tab', id); return id; })()">
+      <body data-signals:tab-id="sessionStorage.getItem('_ds_tab') || (() => { const id = crypto.randomUUID(); sessionStorage.setItem('_ds_tab', id); return id; })()">
 
   `sessionStorage` is per-tab — each tab gets its own UUID that
   persists across full-page navigations but is unique per tab.
+
+  > **Important:** write `tab-id`, not `tabId`. HTML lowercases attribute
+  > names, so `data-signals:tabId` reaches Datastar as `tabid` and produces
+  > a signal called `tabid` — which never matches the `tabId` this module
+  > reads, so dedup silently does nothing. Datastar camelizes on hyphens,
+  > so the kebab-case form is what yields `tabId`.
 
   > **Important:** Do not use a `_` prefix for the signal name.
   > Datastar treats `_`-prefixed signals as local (client-only) and

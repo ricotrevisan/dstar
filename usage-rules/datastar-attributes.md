@@ -23,6 +23,23 @@ Declare reactive state that syncs between client and server.
 </div>
 ```
 
+### Multi-Word Signal Names: Always Kebab-Case
+
+HTML lowercases attribute names, and Datastar camelizes the result on
+hyphens. So a camelCase attribute silently produces an all-lowercase
+signal, and the server never sees the name it expects:
+
+```heex
+<!-- WRONG: parsed as data-signals:tabid → signal is `tabid` -->
+<body data-signals:tabId="crypto.randomUUID()">
+
+<!-- RIGHT: `tab-id` camelizes to `tabId` -->
+<body data-signals:tab-id="crypto.randomUUID()">
+```
+
+Nothing errors — you get a signal under a name nobody reads. The same
+rule applies to `data-bind:*` and every other keyed attribute.
+
 ### Value Quoting Rules
 ```heex
 <!-- Numbers: unquoted -->
@@ -699,6 +716,13 @@ Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
 - `retryMaxCount: Infinity` — For persistent streams
 - `headers: {...}` — Custom request headers
 - `indicator: "signalName"` — Loading state signal
+
+**`retryMaxCount` counts consecutive *connection failures*, not reconnect
+cycles.** The client resets it — and the backoff interval — on every 200,
+so a stream that connects and is then ended will reconnect forever
+regardless of the value. Only `retryMaxCount: 0` stops a reconnect loop.
+This matters when auto-reconnect is combined with stream deduplication:
+each tab's reconnect kills the other's stream, which reconnects, forever.
 
 ---
 
