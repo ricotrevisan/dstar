@@ -213,7 +213,7 @@ Everything goes through the `Dstar` convenience module, which delegates to the l
 | `execute_script/2,3` | Run JavaScript on the client. |
 | `redirect/2,3` | Navigate the client to a URL. |
 | `console_log/2,3` | Log to the browser console. |
-| `post/2,3` `get/2,3` `put/2,3` `patch/2,3` `delete/2,3` | Build `@post(...)`-style action expressions for Datastar attributes. |
+| `post/1,2,3` `get/1,2,3` `put/1,2,3` `patch/1,2,3` `delete/1,2,3` | Build `@post(...)`-style action expressions for Datastar attributes. Arity 1 is the dynamic form (`Dstar.post("increment")`), which resolves the module client-side. |
 
 ## Real-time Streaming
 
@@ -546,7 +546,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2` |
 | `Dstar.Signals` | `read/1`, `patch/2,3`, `patch_raw/2,3`, `nudge/2,3`, `remove_signals/2,3`, `format_patch/1,2`, `format_remove/1,2` |
 | `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `append/3,4`, `upsert/2,3`, `format_patch/1,2`, `format_remove/1,2` |
-| `Dstar.Actions` | `post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`, `encode_module/1`, `decode_module/1` |
+| `Dstar.Actions` | `post/1,2,3`, `get/1,2,3`, `put/1,2,3`, `patch/1,2,3`, `delete/1,2,3`, `on_nudge/2`, `encode_module/1`, `decode_module/1` |
 | `Dstar.Scripts` | `execute/2,3`, `redirect/2,3`, `console_log/2,3` |
 | `Dstar.Plugs.Dispatch` | Standard Plug for dynamic event routing |
 | `Dstar.Plugs.RenameCsrfParam` | Standard Plug for CSRF param compatibility |

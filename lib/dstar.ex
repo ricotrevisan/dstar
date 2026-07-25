@@ -111,7 +111,8 @@ defmodule Dstar do
   @doc """
   Patches a DOM element on the client via SSE.
 
-  Requires a `:selector` option.
+  Takes a `:selector`, or — with no selector — targets by the `id` on each
+  top-level element of `html`. See `Dstar.Elements.patch/3` for all options.
 
   ## Example
 

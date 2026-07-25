@@ -1,4 +1,7 @@
 defmodule Dstar.SSE do
+  # The Datastar SDK's default reconnection time, in ms. See maybe_add_retry/2.
+  @default_retry 1000
+
   @moduledoc """
   Server-Sent Event (SSE) connection helpers.
 
@@ -176,6 +179,18 @@ defmodule Dstar.SSE do
   defp maybe_add_id(lines, id), do: lines ++ ["id: #{strip_line_breaks(id)}\n"]
 
   defp maybe_add_retry(lines, nil), do: lines
+
+  # The Datastar SDK ADR specifies emitting `retry:` only when it differs
+  # from the SDK default ("unless default of 1000"), and the official Go
+  # golden suite asserts it — so this omission is conformance, not a
+  # byte-shaving optimization. Do not "fix" it without running that suite.
+  #
+  # Known corner case: EventSource persists the reconnection time once set,
+  # so a stream that already sent `retry: 5000` cannot lower itself back to
+  # the default — `retry: 1000` is omitted rather than re-sent. Send a
+  # non-default value if you need to reset an elevated retry mid-stream.
+  defp maybe_add_retry(lines, @default_retry), do: lines
+
   defp maybe_add_retry(lines, retry), do: lines ++ ["retry: #{strip_line_breaks(retry)}\n"]
 
   defp add_data_lines(lines, data_lines) do

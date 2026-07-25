@@ -133,6 +133,12 @@ defmodule Dstar.Signals do
   - `:event_id` - Event ID for client tracking
   - `:retry` - Retry duration in milliseconds
 
+  ## Path validation
+
+  Raises `ArgumentError` on a path that is empty, starts or ends with a dot,
+  or contains consecutive dots — each would otherwise produce a signal name
+  with an empty segment.
+
   """
   @spec remove_signals(Plug.Conn.t(), String.t() | [String.t()], keyword()) :: Plug.Conn.t()
   def remove_signals(conn, paths, opts \\ [])

@@ -126,24 +126,26 @@ defmodule Dstar.SSETest do
   end
 
   describe "send_event/4" do
-    test "emits retry whenever one is given, including 1000" do
+    # Per the Datastar SDK ADR, `retry:` is emitted only when it differs from
+    # the SDK default of 1000. The official Go golden suite asserts this.
+    test "omits retry when it equals the Datastar default of 1000" do
       conn = conn(:post, "/test") |> SSE.start()
 
-      # 1000 used to be swallowed as "the client default", which meant an
-      # explicit retry: 1000 could not reset a stream that had already sent
-      # a larger value.
       {:ok, result} = SSE.send_event(conn, "test-event", ["data"], retry: 1000)
-      assert result.resp_body == "event: test-event\nretry: 1000\ndata: data\n\n"
+      assert result.resp_body == "event: test-event\ndata: data\n\n"
     end
 
-    test "an explicit retry can lower a previously sent one" do
+    # Documents the known consequence of the rule above: EventSource persists
+    # the reconnection time, so an elevated retry cannot be lowered back to
+    # the default — the field is omitted rather than re-sent.
+    test "retry: 1000 does not reset a previously elevated retry" do
       conn = conn(:post, "/test") |> SSE.start()
 
       {:ok, conn} = SSE.send_event(conn, "a", ["x"], retry: 5000)
       {:ok, result} = SSE.send_event(conn, "b", ["y"], retry: 1000)
 
       assert result.resp_body ==
-               "event: a\nretry: 5000\ndata: x\n\n" <> "event: b\nretry: 1000\ndata: y\n\n"
+               "event: a\nretry: 5000\ndata: x\n\n" <> "event: b\ndata: y\n\n"
     end
 
     test "omits retry when none is given" do
