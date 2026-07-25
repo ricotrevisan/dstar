@@ -13,8 +13,8 @@
   waits for the key to be *released* (killing only a holder that ignores
   the signal), the `Registry.register/3` result is no longer discarded,
   and the handover is bounded at 1s instead of 5s.
-- **Stream state outlived the stream** (#18). `Dstar.Page.Plug.loop/3` did
-  no teardown, so on HTTP/1.1 keep-alive — where the connection process
+- **Stream state outlived the stream** (#18). The `Dstar.Page.Plug` receive
+  loop did no teardown, so on HTTP/1.1 keep-alive — where the connection process
   survives the stream — registry entries and subscriptions leaked onto a
   process serving unrelated requests. Every exit path now unregisters from
   `StreamRegistry` and calls the new optional `handle_disconnect/1`.
