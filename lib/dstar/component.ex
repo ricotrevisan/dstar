@@ -41,8 +41,6 @@ defmodule Dstar.Component do
   lives in signals, the DOM, and the database.
   """
 
-  @verbs ~w(get post put patch delete)a
-
   defmacro __using__(_opts) do
     unless Code.ensure_loaded?(Phoenix.Component) do
       raise ArgumentError, """
@@ -95,32 +93,15 @@ defmodule Dstar.Component do
   @doc false
   def build_event(module, name, opts)
       when is_atom(module) and is_binary(name) and is_list(opts) do
-    if String.contains?(name, ["'", "/"]) do
-      raise ArgumentError,
-            "event name must not contain \"'\" or \"/\", got: #{inspect(name)}"
-    end
-
-    verb = Keyword.get(opts, :verb, :post)
-
-    unless verb in @verbs do
-      raise ArgumentError,
-            "invalid verb: #{inspect(verb)}. Must be one of #{inspect(@verbs)}"
-    end
-
     encoded = Dstar.Actions.encode_module(module)
 
     # The dispatch base comes from <body data-ds-base="...">, defaulting to
     # "/ds". It must match the base given to `dstar_components/2` — keeping
     # it client-side means one layout attribute covers app path prefixes too.
-    args =
-      "(document.body.dataset.dsBase || '/ds').replace(/\\/+$/, '') + '/#{encoded}/#{name}'"
-
-    args =
-      case Keyword.get(opts, :opts) do
-        nil -> args
-        extra when is_binary(extra) -> args <> ", " <> extra
-      end
-
-    "@#{verb}(#{args})"
+    Dstar.Actions.build_expression(
+      name,
+      "(document.body.dataset.dsBase || '/ds').replace(/\\/+$/, '') + '/#{encoded}/#{name}'",
+      opts
+    )
   end
 end

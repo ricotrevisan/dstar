@@ -141,6 +141,37 @@ defmodule Dstar.Actions do
     }
   end
 
+  # ── Shared expression builder ────────────────────────────────────────
+
+  @doc false
+  # Shared by `Dstar.Page.Helpers.event/2` and `Dstar.Component.build_event/3`.
+  # Both validate the event name and verb identically and assemble the same
+  # `@verb(<url>, <opts>)` shape — they differ only in `url_expression`, the
+  # JS that computes the target URL in the browser. Kept here so the verb
+  # allowlist has one definition.
+  def build_expression(name, url_expression, opts)
+      when is_binary(name) and is_binary(url_expression) and is_list(opts) do
+    if String.contains?(name, ["'", "/"]) do
+      raise ArgumentError,
+            "event name must not contain \"'\" or \"/\", got: #{inspect(name)}"
+    end
+
+    verb = Keyword.get(opts, :verb, :post)
+
+    unless verb in @verbs do
+      raise ArgumentError,
+            "invalid verb: #{inspect(verb)}. Must be one of #{inspect(@verbs)}"
+    end
+
+    args =
+      case Keyword.get(opts, :opts) do
+        nil -> url_expression
+        extra when is_binary(extra) -> url_expression <> ", " <> extra
+      end
+
+    "@#{verb}(#{args})"
+  end
+
   # ── Private ──────────────────────────────────────────────────────────
 
   defp action(verb, module, event_name, opts) do
