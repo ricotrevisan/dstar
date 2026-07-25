@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 — 2026-07-25
 
 ### Fixed
 
@@ -30,9 +30,17 @@
   documented setup silently disabled dedup. Corrected to `tab-id`, with
   the general kebab-case rule documented for all keyed attributes.
 - **`retryMaxCount` cannot bound a reconnect loop** (#21). It counts
-  consecutive *connection failures* and resets on every 200; only
-  `retryMaxCount: 0` stops a reconnect cycle, which matters when
-  auto-reconnect is combined with stream dedup.
+  consecutive *connection failures* and resets on every 200, so only
+  `retryMaxCount: 0` stops a cycle that reconnects successfully each pass.
+  Scoped to streams ending as a transport error (HTTP/2 takeover, kill,
+  crash) or with `retry: "always"` — a cleanly ended stream does not
+  reconnect at all under the default `retry: "auto"`.
+- **`connect()` must not sit on the same element as the signals it needs.**
+  A `data-init={connect()}` beside `data-signals:*` fires before those
+  signals are applied, so the stream POST carries none of them and
+  `StreamRegistry` dedup silently does nothing. Warned on
+  `Dstar.Page.Helpers.connect/1`.
+- The installation snippet pinned `0.1.0-alpha.2`, four releases stale.
 
 ### Added
 
