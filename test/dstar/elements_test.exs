@@ -165,6 +165,42 @@ defmodule Dstar.ElementsTest do
       refute internal_blank_line?(frame)
     end
 
+    test "a line break in the selector cannot inject extra fields into the event" do
+      # The client folds a `data: <key> <value>` line into the event's field
+      # map and *accumulates* repeats, so an injected `elements` line is
+      # prepended to the real HTML and morphed into the DOM — stored XSS from
+      # nothing worse than a selector built out of untrusted data.
+      for break_char <- ["\n", "\r", "\r\n"] do
+        frame =
+          Elements.format_patch("<li id=\"row-1\">legit</li>",
+            selector: "#row-1#{break_char}elements <img src=x onerror=alert(1)>"
+          )
+
+        # The payload survives as inert text inside the selector value (where
+        # it simply matches nothing); what must not happen is a second field.
+        assert length(String.split(frame, "data: elements ")) == 2,
+               "injected a second elements field with #{inspect(break_char)}: #{inspect(frame)}"
+
+        assert length(String.split(frame, "\ndata: ")) == 3,
+               "injected an extra field with #{inspect(break_char)}: #{inspect(frame)}"
+      end
+    end
+
+    test "a line break in the selector cannot inject a mode field" do
+      frame =
+        Elements.format_patch("<div id=\"a\">x</div>", selector: "#a\nmode remove")
+
+      refute frame =~ "data: mode"
+    end
+
+    test "remove/3 does not let a line break redirect the selector" do
+      # A string primary key in a DOM id is the realistic source here.
+      frame = Elements.format_remove("#post-evil\nselector body > *")
+
+      assert length(String.split(frame, "data: selector ")) == 2
+      assert length(String.split(frame, "\ndata: ")) == 3
+    end
+
     test "CRLF multiline HTML renders one clean elements line per physical line" do
       html = "<div>\r\n  <span>hi</span>\r\n</div>"
 

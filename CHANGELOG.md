@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.5 — 2026-07-25
+
+### Security
+
+- **SSE field injection via a line break in `:selector`.** `Dstar.SSE` splits
+  every `data:` value on line terminators so multi-line `elements` HTML frames
+  correctly (the 0.1.1 fix). `selector` went through the same path, so a line
+  break in it opened a *second* field inside the same event — and the Datastar
+  client **accumulates** repeated fields rather than overwriting them, joining
+  them with newlines. An injected `elements` line was therefore prepended to
+  the real HTML and morphed into the DOM of every subscribed client:
+
+      conn |> Dstar.patch_elements(html, selector: "#row-" <> untrusted)
+
+  With `untrusted` carrying `"1\nelements <img src=x onerror=…>"`, that is
+  stored XSS; a plainer payload silently redirects the patch at an attacker's
+  chosen selector (`selector body > *` on a `remove` deletes the page). Any
+  selector built from a record id, slug, or other user-supplied value was a
+  vector. 0.1.1 closed frame injection — escaping into a *new event* — but not
+  field injection *within* an event.
+
+  Line terminators are now stripped from `:selector`, where they are
+  meaningless anyway. `mode` and `namespace` were never reachable (validated
+  against fixed atom lists), and `signals` is JSON-escaped.
+
+  Found while adversarially reviewing the `ash_dstar` Stream bridge, which
+  derives a DOM id from a record's primary key — a string primary key
+  containing a newline reaches `remove_elements/2` as a selector.
+
 ## 0.1.4 — 2026-07-25
 
 ### Fixed

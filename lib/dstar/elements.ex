@@ -221,7 +221,19 @@ defmodule Dstar.Elements do
   defp maybe_add_selector(lines, nil), do: lines
 
   defp maybe_add_selector(lines, selector) do
-    lines ++ ["selector " <> selector]
+    lines ++ ["selector " <> single_line(selector)]
+  end
+
+  # `selector` is a single-valued SSE field, but `Dstar.SSE` splits every
+  # `data:` value on line terminators so multi-line `elements` HTML frames
+  # correctly. A line break here would therefore open a *second* field in the
+  # same event — and the client accumulates repeated fields rather than
+  # overwriting them, so an injected `elements` line is prepended to the real
+  # HTML and morphed into the DOM. Any selector built from untrusted data
+  # (a record id, a slug) would be a stored-XSS vector. Line terminators are
+  # meaningless in a CSS selector, so dropping them loses nothing.
+  defp single_line(value) when is_binary(value) do
+    String.replace(value, ["\r\n", "\r", "\n"], "")
   end
 
   defp maybe_add_mode(lines, :outer), do: lines
