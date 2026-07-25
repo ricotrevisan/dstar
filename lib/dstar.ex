@@ -180,10 +180,10 @@ defmodule Dstar do
   ## Examples
 
       Dstar.post(MyAppWeb.CounterHandler, "increment")
-      # => "@post('/ds/my_app_web-counter_handler/increment', {headers: ...})"
+      # => "@post('/ds/my_app_web-counter_handler/increment')"
 
       Dstar.post("increment")
-      # => "@post('/ds/' + $_dstar_module + '/increment', {headers: ...})"
+      # => "@post('/ds/' + $_dstar_module + '/increment')"
 
   """
   defdelegate post(module_or_name, name_or_opts \\ []), to: Dstar.Actions
