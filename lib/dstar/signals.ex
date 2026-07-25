@@ -92,21 +92,7 @@ defmodule Dstar.Signals do
   """
   @spec patch_raw(Plug.Conn.t(), String.t(), keyword()) :: Plug.Conn.t()
   def patch_raw(conn, json, opts \\ []) when is_binary(json) do
-    only_if_missing = Keyword.get(opts, :only_if_missing, @default_only_if_missing)
-
-    data_lines =
-      []
-      |> maybe_add_only_if_missing(only_if_missing)
-      |> add_signals_data(json)
-
-    event_opts =
-      [
-        event_id: opts[:event_id],
-        retry: opts[:retry]
-      ]
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-
-    SSE.send_event!(conn, @event_type, data_lines, event_opts)
+    SSE.send_event!(conn, @event_type, data_lines(json, opts), event_opts(opts))
   end
 
   @doc """
@@ -120,15 +106,7 @@ defmodule Dstar.Signals do
   """
   @spec format_patch(map(), keyword()) :: String.t()
   def format_patch(signals, opts \\ []) when is_map(signals) do
-    only_if_missing = Keyword.get(opts, :only_if_missing, @default_only_if_missing)
-    json = Jason.encode!(signals)
-
-    data_lines =
-      []
-      |> maybe_add_only_if_missing(only_if_missing)
-      |> add_signals_data(json)
-
-    SSE.format_event(@event_type, data_lines)
+    SSE.format_event(@event_type, data_lines(Jason.encode!(signals), opts))
   end
 
   @doc """
@@ -235,6 +213,20 @@ defmodule Dstar.Signals do
   end
 
   # Private helpers
+
+  # The `data:` payload, shared by patch_raw/3 and format_patch/2 — the two
+  # differ only in how the event gets framed (chunked onto a conn vs.
+  # returned as a string), never in what it contains.
+  defp data_lines(json, opts) do
+    []
+    |> maybe_add_only_if_missing(Keyword.get(opts, :only_if_missing, @default_only_if_missing))
+    |> add_signals_data(json)
+  end
+
+  defp event_opts(opts) do
+    [event_id: opts[:event_id], retry: opts[:retry]]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
 
   defp decode_signals(""), do: %{}
   defp decode_signals(nil), do: %{}
