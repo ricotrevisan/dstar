@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.6 — 2026-07-25
+
+### Documentation
+
+- **Retracted: the `connect()` placement warning.** 0.1.4 and 0.1.5 documented
+  that a `data-init={connect()}` on the same element as the `data-signals:*` it
+  needs fires before those signals are applied, so the stream POST omits them.
+  That is false and the mechanism given for it does not exist.
+
+  Isolated against the Datastar v1 bundle with a static page and an echo
+  endpoint — no Elixir, no dstar in the loop. Signals and `data-init` sharing an
+  element send correctly, including the exact multi-signal kebab-case shape the
+  warning called broken. There is no signals-first pass in the client to support
+  the claim: every plugin name is added to the restricted set as it registers,
+  so that gate batches late-registered plugins rather than ordering them, and
+  attributes apply in document order.
+
+  The original report came from a measurement taken against stale tabs from a
+  previous server instance with reconnect churn in flight.
+
+  Placing `connect()` on a child element remains perfectly fine — it is simply
+  not necessary.
+
 ## 0.1.5 — 2026-07-25
 
 ### Security

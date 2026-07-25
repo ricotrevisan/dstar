@@ -6,3 +6,4 @@ doc
 .codex/
 plans/
 graphify-out/
+erl_crash.dump
