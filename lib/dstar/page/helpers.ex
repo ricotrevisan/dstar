@@ -75,25 +75,6 @@ defmodule Dstar.Page.Helpers do
 
   Always emits `@post` — Dstar streams connect over POST.
 
-  > #### Put this on a child element, not beside your signals {: .warning}
-  >
-  > A `data-init={connect()}` on the **same element** as the
-  > `data-signals:*` it needs fires before those signals are applied, so
-  > the stream POST carries none of them — `handle_connect/2` sees nothing,
-  > and `Dstar.Utility.StreamRegistry` dedup silently does not happen
-  > because `tabId` never arrives.
-  >
-  >     <!-- BROKEN: the connect goes out without tabId -->
-  >     <body data-signals:tab-id={...} data-init={connect()}>
-  >
-  >     <!-- WORKS -->
-  >     <body data-signals:tab-id={...}>
-  >       <div data-init={connect()}></div>
-  >
-  > Signals declared on an ancestor (the usual root-layout `<body>`) are
-  > applied before a descendant's `data-init`, which is why the documented
-  > setup works.
-
   > #### retryMaxCount does not bound reconnect cycles {: .warning}
   >
   > It counts *consecutive failures to connect*, and the client resets it —

@@ -64,11 +64,6 @@
   Scoped to streams ending as a transport error (HTTP/2 takeover, kill,
   crash) or with `retry: "always"` — a cleanly ended stream does not
   reconnect at all under the default `retry: "auto"`.
-- **`connect()` must not sit on the same element as the signals it needs.**
-  A `data-init={connect()}` beside `data-signals:*` fires before those
-  signals are applied, so the stream POST carries none of them and
-  `StreamRegistry` dedup silently does nothing. Warned on
-  `Dstar.Page.Helpers.connect/1`.
 - The installation snippet pinned `0.1.0-alpha.2`, four releases stale.
 
 ### Added
