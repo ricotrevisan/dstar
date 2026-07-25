@@ -195,193 +195,25 @@ Unlike page handlers, component handlers call `start()` themselves — the dispa
 
 *Everything above is built from these functions. Use them directly in plain controllers, custom plugs, or anywhere you have a `%Plug.Conn{}` — pages are optional sugar, the core is the contract.*
 
-Everything goes through the `Dstar` convenience module, which delegates to lower-level modules.
+Everything goes through the `Dstar` convenience module, which delegates to the lower-level modules listed below. Full signatures, options and examples live in the [API docs](https://hexdocs.pm/dstar/Dstar.html) — this table is a map, not a reference.
 
-### `Dstar.start(conn)` → `Plug.Conn.t()`
-
-Opens an SSE connection. Sets `text/event-stream` content type, disables caching, starts a chunked response.
-
-```elixir
-conn = Dstar.start(conn)
-```
-
-### `Dstar.start_stream(conn, scope_key)` → `Plug.Conn.t()`
-
-Like `start/1`, but with per-tab stream deduplication. Kills any previous stream process for the same user+tab before opening a new one. Requires setup — see [Stream Deduplication](#stream-deduplication-optional).
-
-```elixir
-conn = Dstar.start_stream(conn, current_user.id)
-```
-
-### `Dstar.check_connection(conn)` → `{:ok, Plug.Conn.t()} | {:error, Plug.Conn.t()}`
-
-Checks if an SSE connection is still open by sending an SSE comment line. Returns `{:ok, conn}` if the connection is active, `{:error, conn}` if closed or not yet started. Useful for detecting disconnections in streaming loops.
-
-```elixir
-case Dstar.check_connection(conn) do
-  {:ok, conn} ->
-    conn = Dstar.patch_signals(conn, %{data: new_data})
-    loop(conn)
-  
-  {:error, _conn} ->
-    # Client disconnected, clean up
-    Phoenix.PubSub.unsubscribe(MyApp.PubSub, "topic")
-    :ok
-end
-```
-
-### `Dstar.read_signals(conn)` → `map()`
-
-Reads Datastar signals from the request. For `GET` requests, reads from the `datastar` query parameter. For everything else, reads from the JSON body.
-
-```elixir
-signals = Dstar.read_signals(conn)
-count = signals["count"] || 0
-```
-
-### `Dstar.patch_signals(conn, signals, opts \\ [])` → `Plug.Conn.t()`
-
-Sends a `datastar-patch-signals` event. Updates reactive signals on the client.
-
-```elixir
-conn
-|> Dstar.patch_signals(%{count: 42, message: "hello"})
-|> Dstar.patch_signals(%{defaults: true}, only_if_missing: true)
-```
-
-**Options:**
-- `:only_if_missing` — Only patch signals that don't exist on the client (default: `false`)
-- `:event_id` — Event ID for client tracking
-- `:retry` — Retry duration in milliseconds
-
-### `Dstar.remove_signals(conn, paths, opts \\ [])` → `Plug.Conn.t()`
-
-Removes signals from the client by setting them to `nil`. Accepts a single dot-notated path string or a list of paths. Paths with shared prefixes are deep-merged correctly.
-
-```elixir
-# Remove single signal
-conn |> Dstar.remove_signals("user.profile.theme")
-
-# Remove multiple signals
-conn |> Dstar.remove_signals([
-  "user.name",
-  "user.email",
-  "user.profile.avatar"
-])
-
-# Common use case: logout
-conn
-|> Dstar.start()
-|> Dstar.remove_signals(["user", "session", "preferences"])
-|> Dstar.redirect("/login")
-```
-
-Validates paths and raises on empty strings, leading/trailing/consecutive dots.
-
-### `Dstar.patch_elements(conn, html, opts)` → `Plug.Conn.t()`
-
-Sends a `datastar-patch-elements` event. Patches DOM elements on the client. Accepts both binary strings and `Phoenix.HTML.safe()` tuples (e.g., HEEx template output).
-
-```elixir
-conn
-|> Dstar.patch_elements(~s(<span id="count">42</span>), selector: "#count")
-|> Dstar.patch_elements("<li>new item</li>", selector: "ul#items", mode: :append)
-
-# SVG chart update
-svg = "<svg>...</svg>"
-conn |> Dstar.patch_elements(svg, selector: "#chart", namespace: :svg)
-
-# MathML formula
-mathml = "<math>...</math>"
-conn |> Dstar.patch_elements(mathml, selector: "#formula", namespace: :mathml)
-```
-
-**Options:**
-- `:selector` — CSS selector (required)
-- `:mode` — `:outer` (default), `:inner`, `:append`, `:prepend`, `:before`, `:after`, `:replace`, `:remove`
-- `:namespace` — `:html` (default), `:svg`, `:mathml`
-- `:use_view_transitions` — Enable View Transitions API (default: `false`)
-- `:event_id` — Event ID for client tracking
-- `:retry` — Retry duration in milliseconds
-
-### `Dstar.remove_elements(conn, selector, opts \\ [])` → `Plug.Conn.t()`
-
-Sends a `datastar-patch-elements` event that removes matching elements.
-
-```elixir
-conn |> Dstar.remove_elements("#flash-message")
-```
-
-### `Dstar.append_elements(conn, html, container, opts \\ [])` → `Plug.Conn.t()`
-
-Appends an element as the last child of a container.
-
-```elixir
-conn |> Dstar.append_elements(post_row(%{post: post}), "#posts")
-```
-
-### `Dstar.upsert_elements(conn, html, opts \\ [])` → `Plug.Conn.t()`
-
-Morphs the element whose DOM `id` matches the root of `html`. Dropped by the client if this tab never rendered that row.
-
-```elixir
-conn |> Dstar.upsert_elements(post_row(%{post: post}))
-```
-
-### `Dstar.nudge(conn, key, opts \\ [])` → `Plug.Conn.t()`
-
-Signals that a collection changed, without saying how. Each tab re-runs its own load action with its own filter/sort/page signals.
-
-```elixir
-conn |> Dstar.nudge("posts")
-```
-
-### `Dstar.post(module, event_name)` → `String.t()`
-
-Generates a `@post(...)` expression for use in Datastar attributes. All HTTP verbs are available: `Dstar.get/2,3`, `Dstar.put/2,3`, `Dstar.patch/2,3`, `Dstar.delete/2,3` — they all follow the same API.
-
-```elixir
-Dstar.post(MyAppWeb.CounterHandler, "increment")
-# => "@post('/ds/my_app_web-counter_handler/increment')"
-
-Dstar.delete(MyAppWeb.TodoHandler, "remove")
-# => "@delete('/ds/my_app_web-todo_handler/remove')"
-```
-
-Also supports dynamic module references and URL prefixes. See `Dstar.Actions` docs for details.
-
-### `Dstar.execute_script(conn, script, opts \\ [])` → `Plug.Conn.t()`
-
-Executes JavaScript on the client by appending a `<script>` tag via SSE.
-
-```elixir
-conn |> Dstar.execute_script("alert('Hello!')")
-conn |> Dstar.execute_script("console.log('debug')", auto_remove: false)
-```
-
-**Options:**
-- `:auto_remove` — Remove script tag after execution (default: `true`)
-- `:attributes` — Map of additional script tag attributes
-
-### `Dstar.redirect(conn, url, opts \\ [])` → `Plug.Conn.t()`
-
-Redirects the client to the given URL via JavaScript.
-
-```elixir
-conn |> Dstar.redirect("/workspaces")
-```
-
-### `Dstar.console_log(conn, message, opts \\ [])` → `Plug.Conn.t()`
-
-Logs a message to the browser console via SSE.
-
-```elixir
-conn |> Dstar.console_log("Debug info")
-conn |> Dstar.console_log("Warning!", level: :warn)
-```
-
-**Options:**
-- `:level` — `:log` (default), `:warn`, `:error`, `:info`, `:debug`
+| Function | Does |
+|----------|------|
+| `start/1` | Open an SSE connection (`text/event-stream`, no-cache, chunked). |
+| `start_stream/2` | Open an SSE stream with per-tab dedup. Needs `Dstar.Utility.StreamRegistry`. |
+| `check_connection/1` | `{:ok, conn}` / `{:error, conn}` — is the client still there? |
+| `read_signals/1` | Read the request's Datastar signals as a map. |
+| `patch_signals/2,3` | Patch signals on the client. |
+| `remove_signals/2,3` | Remove signals by dot-notated path (or list of paths). |
+| `nudge/2,3` | Tell tabs a collection changed, so each reloads with its own filters. |
+| `patch_elements/3` | Patch DOM elements. Needs a `:selector`, or ids on the HTML roots. |
+| `remove_elements/2,3` | Remove DOM elements by selector. |
+| `append_elements/3,4` | Append HTML as the last child of a container. |
+| `upsert_elements/2,3` | Morph the element whose id matches the HTML root. |
+| `execute_script/2,3` | Run JavaScript on the client. |
+| `redirect/2,3` | Navigate the client to a URL. |
+| `console_log/2,3` | Log to the browser console. |
+| `post/2,3` `get/2,3` `put/2,3` `patch/2,3` `delete/2,3` | Build `@post(...)`-style action expressions for Datastar attributes. |
 
 ## Real-time Streaming
 

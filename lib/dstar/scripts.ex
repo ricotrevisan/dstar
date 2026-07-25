@@ -10,6 +10,8 @@ defmodule Dstar.Scripts do
 
   alias Dstar.Elements
 
+  @levels ~w(log warn error info debug)a
+
   @doc """
   Executes JavaScript on the client by appending a script tag to the body.
 
@@ -91,7 +93,9 @@ defmodule Dstar.Scripts do
 
   ## Options
 
-  - `:level` - Console method: `:log`, `:warn`, `:error`, `:info`, `:debug` (default: :log)
+  - `:level` - Console method: `:log`, `:warn`, `:error`, `:info`, `:debug`
+    (default: `:log`). Anything else raises — a mistyped level used to fall
+    back to `:log` silently, which hid the typo rather than the message.
   - Plus all options from `execute/3`
 
   ## Examples
@@ -105,15 +109,10 @@ defmodule Dstar.Scripts do
   def console_log(conn, message, opts \\ []) do
     {level, opts} = Keyword.pop(opts, :level, :log)
 
-    level_str =
-      case level do
-        :log -> "log"
-        :warn -> "warn"
-        :error -> "error"
-        :info -> "info"
-        :debug -> "debug"
-        _ -> "log"
-      end
+    unless level in @levels do
+      raise ArgumentError,
+            "invalid level: #{inspect(level)}. Must be one of #{inspect(@levels)}"
+    end
 
     js_message =
       case message do
@@ -121,7 +120,7 @@ defmodule Dstar.Scripts do
         msg -> Jason.encode!(msg)
       end
 
-    execute(conn, "console.#{level_str}(#{js_message})", opts)
+    execute(conn, "console.#{level}(#{js_message})", opts)
   end
 
   # Private helpers

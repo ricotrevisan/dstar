@@ -389,108 +389,84 @@ defmodule Dstar.ScriptsTest do
 
   describe "console_log/3" do
     test "logs a basic string message" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Debug message")
+      result = Scripts.console_log(chunked_conn(), "Debug message")
 
-      assert result.state == :chunked
+      assert result.resp_body =~ "console.log('Debug message')"
     end
 
-    test "logs with warn level" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Warning!", level: :warn)
+    for level <- ~w(log warn error info debug)a do
+      test "logs with #{level} level" do
+        result = Scripts.console_log(chunked_conn(), "Hi", level: unquote(level))
 
-      assert result.state == :chunked
+        assert result.resp_body =~ "console.#{unquote(level)}('Hi')"
+      end
     end
 
-    test "logs with error level" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Error!", level: :error)
-
-      assert result.state == :chunked
-    end
-
-    test "logs with info level" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Info message", level: :info)
-
-      assert result.state == :chunked
-    end
-
-    test "logs with debug level" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Debug message", level: :debug)
-
-      assert result.state == :chunked
-    end
-
-    test "defaults to log level when invalid level provided" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Message", level: :invalid)
-
-      assert result.state == :chunked
+    # A mistyped level used to fall through to :log, hiding the typo. Note
+    # that :warning — Elixir's own Logger spelling — is one such typo.
+    test "raises on an invalid level" do
+      for bad <- [:invalid, :warning, "warn", nil] do
+        assert_raise ArgumentError, ~r/invalid level/, fn ->
+          Scripts.console_log(chunked_conn(), "Message", level: bad)
+        end
+      end
     end
 
     test "escapes single quotes in string messages" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "It's a test")
+      result = Scripts.console_log(chunked_conn(), "It's a test")
 
-      assert result.state == :chunked
+      assert result.resp_body =~ ~S|console.log('It\'s a test')|
     end
 
     test "escapes backslashes in string messages" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Path: C:\\Users\\test")
+      result = Scripts.console_log(chunked_conn(), "Path: C:\\Users\\test")
 
-      assert result.state == :chunked
+      assert result.resp_body =~ ~S|console.log('Path: C:\\Users\\test')|
     end
 
     test "escapes newlines in string messages" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Line 1\nLine 2")
+      result = Scripts.console_log(chunked_conn(), "Line 1\nLine 2")
 
-      assert result.state == :chunked
+      assert result.resp_body =~ ~S|console.log('Line 1\nLine 2')|
+      # The literal newline must not survive into the SSE frame.
+      refute result.resp_body =~ "Line 1\nLine 2"
     end
 
     test "escapes carriage returns in string messages" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, "Line 1\r\nLine 2")
+      result = Scripts.console_log(chunked_conn(), "Line 1\r\nLine 2")
 
-      assert result.state == :chunked
+      assert result.resp_body =~ ~S|console.log('Line 1\r\nLine 2')|
+      refute result.resp_body =~ "Line 1\r\nLine 2"
     end
 
     test "logs map as JSON object" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, %{user: "alice", id: 123})
+      result = Scripts.console_log(chunked_conn(), %{user: "alice", id: 123})
 
-      assert result.state == :chunked
+      assert result.resp_body =~ ~S|console.log({"id":123,"user":"alice"})|
     end
 
     test "logs list as JSON array" do
-      conn = chunked_conn()
-      result = Scripts.console_log(conn, [1, 2, 3])
+      result = Scripts.console_log(chunked_conn(), [1, 2, 3])
 
-      assert result.state == :chunked
+      assert result.resp_body =~ "console.log([1,2,3])"
     end
 
     test "logs nested data structures" do
-      conn = chunked_conn()
-
       result =
-        Scripts.console_log(conn, %{
+        Scripts.console_log(chunked_conn(), %{
           user: %{name: "Bob", tags: ["admin", "user"]},
           count: 42
         })
 
-      assert result.state == :chunked
+      assert result.resp_body =~
+               ~S|console.log({"count":42,"user":{"name":"Bob","tags":["admin","user"]}})|
     end
 
     test "passes options through to execute/3" do
-      conn = chunked_conn()
+      result = Scripts.console_log(chunked_conn(), "Test", level: :warn, event_id: "log-1")
 
-      result =
-        Scripts.console_log(conn, "Test", level: :warn, event_id: "log-1")
-
-      assert result.state == :chunked
+      assert result.resp_body =~ "id: log-1"
+      assert result.resp_body =~ "console.warn('Test')"
     end
   end
 end

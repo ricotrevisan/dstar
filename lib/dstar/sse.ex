@@ -176,7 +176,6 @@ defmodule Dstar.SSE do
   defp maybe_add_id(lines, id), do: lines ++ ["id: #{strip_line_breaks(id)}\n"]
 
   defp maybe_add_retry(lines, nil), do: lines
-  defp maybe_add_retry(lines, 1000), do: lines
   defp maybe_add_retry(lines, retry), do: lines ++ ["retry: #{strip_line_breaks(retry)}\n"]
 
   defp add_data_lines(lines, data_lines) do

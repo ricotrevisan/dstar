@@ -126,23 +126,38 @@ defmodule Dstar.SSETest do
   end
 
   describe "send_event/4" do
-    test "suppresses retry when set to default 1000ms" do
-      conn =
-        conn(:post, "/test")
-        |> SSE.start()
+    test "emits retry whenever one is given, including 1000" do
+      conn = conn(:post, "/test") |> SSE.start()
 
-      # retry: 1000 is the SSE default — should not appear in output
+      # 1000 used to be swallowed as "the client default", which meant an
+      # explicit retry: 1000 could not reset a stream that had already sent
+      # a larger value.
       {:ok, result} = SSE.send_event(conn, "test-event", ["data"], retry: 1000)
-      assert %Plug.Conn{state: :chunked} = result
+      assert result.resp_body == "event: test-event\nretry: 1000\ndata: data\n\n"
+    end
+
+    test "an explicit retry can lower a previously sent one" do
+      conn = conn(:post, "/test") |> SSE.start()
+
+      {:ok, conn} = SSE.send_event(conn, "a", ["x"], retry: 5000)
+      {:ok, result} = SSE.send_event(conn, "b", ["y"], retry: 1000)
+
+      assert result.resp_body ==
+               "event: a\nretry: 5000\ndata: x\n\n" <> "event: b\nretry: 1000\ndata: y\n\n"
+    end
+
+    test "omits retry when none is given" do
+      conn = conn(:post, "/test") |> SSE.start()
+
+      {:ok, result} = SSE.send_event(conn, "test-event", ["data"])
+      refute result.resp_body =~ "retry:"
     end
 
     test "includes retry when set to non-default value" do
-      conn =
-        conn(:post, "/test")
-        |> SSE.start()
+      conn = conn(:post, "/test") |> SSE.start()
 
       {:ok, result} = SSE.send_event(conn, "test-event", ["data"], retry: 5000)
-      assert %Plug.Conn{state: :chunked} = result
+      assert result.resp_body == "event: test-event\nretry: 5000\ndata: data\n\n"
     end
   end
 
