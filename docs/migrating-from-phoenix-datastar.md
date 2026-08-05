@@ -452,7 +452,7 @@ end
 
 ## Step 6: Update CSRF Setup
 
-CSRF protection isn't Datastar's job — it's a wire protocol with no opinion on sessions, so it doesn't read Phoenix's `<meta name="csrf-token">` tag and never sets an `x-csrf-token` header. The token must travel as a signal. The Phoenix meta tag can stay in your layout (other tooling may use it), but Datastar ignores it.
+Phoenix expects the CSRF token in the `_csrf_token` body param — and Datastar can't deliver that: its `_`-prefixed signal keys are front-end-only and never sent to the backend. So the token travels as a non-prefixed signal, and one plug copies it into place. The Phoenix meta tag can stay in your layout (other tooling may use it), but Datastar ignores it.
 
 ```elixir
 # Before — router.ex

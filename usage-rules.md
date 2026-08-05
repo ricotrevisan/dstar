@@ -125,10 +125,10 @@ All functions in `Dstar` module:
 
 ## CSRF Setup
 
-CSRF protection isn't Datastar's job — it's a wire protocol with no opinion
-on sessions, so it doesn't read Phoenix's
-`<meta name="csrf-token">` tag and never sets an `x-csrf-token` header.
-The token must travel as a signal.
+Phoenix expects the CSRF token in the `_csrf_token` body param — and
+Datastar can't deliver that: its `_`-prefixed signal keys are front-end-only
+and never sent to the backend. So the token travels as a non-prefixed
+signal, and one plug copies it into place.
 
 ```elixir
 # In your router pipeline, BEFORE :protect_from_forgery:

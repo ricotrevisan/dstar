@@ -14,10 +14,10 @@ Other libraries give you SSE primitives and leave the rest to you. Dstar gives y
 - **Pages** — `use Dstar.Page` puts render, event handlers, streaming callbacks, and components in one module. One router line wires it.
 - **Event dispatch** — One route, unlimited handlers. `Dstar.Plugs.Dispatch` routes events to handler modules by convention, so you never hand-wire a route per action.
 - **URL generation** — `Dstar.post/2`, `Dstar.get/2`, `Dstar.delete/2` generate `@post(...)` expressions with correct paths. No hand-written URLs in templates.
-- **CSRF handling** — CSRF protection is the app framework's job, not
-  Datastar's: the token travels as a signal, and `Dstar.Plugs.RenameCsrfParam`
-  maps it to where `Plug.CSRFProtection` looks — one plug, one `<body>`
-  attribute, and forgery protection just works.
+- **CSRF handling** — Phoenix wants `_csrf_token`, but Datastar keeps
+  `_`-prefixed signals client-side. So the token travels as a non-prefixed
+  signal, and `Dstar.Plugs.RenameCsrfParam` maps it back — one plug, one
+  `<body>` attribute, and forgery protection just works.
 - **Stream deduplication** — `Dstar.Utility.StreamRegistry` kills zombie SSE processes when users navigate between pages. One process per tab, always.
 - **Console logging** — `Dstar.console_log/2` sends log/warn/error messages straight to the browser DevTools. Debug from the server, read in the browser.
 - **Phoenix.HTML support** — `patch_elements` accepts both raw strings and `Phoenix.HTML.safe()` tuples, so HEEx template output works without conversion.
@@ -543,12 +543,11 @@ you full routing control. Both use the same Dstar functions underneath.
 
 ## CSRF Protection Setup
 
-CSRF protection isn't Datastar's job. Datastar is a wire protocol — like
-HTML, it has no opinion on sessions and deliberately sends no CSRF
-metadata: it doesn't read Phoenix's `<meta name="csrf-token">` tag and
-never sets an `x-csrf-token` header (verified against the v1 bundle: zero
-references to CSRF). The token must therefore travel as a signal, and one
-plug bridges it to where `Plug.CSRFProtection` looks.
+Phoenix expects the CSRF token in the `_csrf_token` body param — and
+Datastar can't deliver that: its `_`-prefixed signal keys are
+front-end-only and never sent to the backend. So we do a little shimming:
+carry the token as a non-prefixed signal, and one plug copies it into
+`_csrf_token` before `Plug.CSRFProtection` runs.
 
 ### The signal pattern (pages, components, and helper routes alike)
 

@@ -31,9 +31,10 @@ runs newer versions.
 
 ## CSRF — how the token travels
 
-Datastar has no built-in CSRF support; the token rides as a **non-prefixed**
-signal (`csrf`), which is why it must not be `_`-prefixed. Transport depends
-on the HTTP method:
+Phoenix expects the CSRF token in `_csrf_token`, but Datastar treats
+`_`-prefixed signal keys as front-end-only and never sends them to the
+backend — so the token rides as a **non-prefixed** signal (`csrf`).
+Transport depends on the HTTP method:
 
 - **POST / PUT / PATCH** — signals are the JSON request body; the token
   arrives as a top-level body param.

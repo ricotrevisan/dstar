@@ -5,15 +5,12 @@ defmodule Dstar.Plugs.RenameCsrfParam do
 
   ## Why this exists
 
-  CSRF protection is the application framework's job — Datastar is a wire
-  protocol and sends no CSRF metadata of its own: it does not read
-  Phoenix's `<meta name="csrf-token">` tag and never sets an
-  `x-csrf-token` header. `Plug.CSRFProtection` looks for the token in
-  `conn.body_params["_csrf_token"]` or the `x-csrf-token` header, so the
-  token has to reach the request some other way — here, as a signal that
-  this plug copies into place before the check runs.
+  Phoenix expects the CSRF token in `conn.body_params["_csrf_token"]` (or
+  the `x-csrf-token` header). Datastar sends its signals with every
+  request, but `_`-prefixed signal keys are front-end-only — never sent to
+  the backend — so a token named `_csrf_token` would never arrive.
 
-  The fix: expose the token as a **non-prefixed** signal (default `csrf`).
+  The shim: expose the token as a **non-prefixed** signal (default `csrf`).
   Because it is not `_`-prefixed, Datastar includes it in every request.
   This plug then copies that value into `_csrf_token` in `body_params`
   before `Plug.CSRFProtection` runs.
