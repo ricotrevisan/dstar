@@ -16,8 +16,9 @@ defmodule Dstar.Actions do
   """
 
   # No explicit CSRF header needed — Datastar sends all signals (including
-  # `csrf`) as body params on every @post. The `RenameCsrfParam` plug copies
-  # the `csrf` param into `_csrf_token` for `Plug.CSRFProtection`.
+  # `csrf`) as body params on POST/PUT/PATCH and in the `datastar` query
+  # parameter on GET/DELETE. The `RenameCsrfParam` plug copies the token
+  # into `_csrf_token` for `Plug.CSRFProtection` from either channel.
   #
   # To set up the token, add this signal to your root layout:
   #
@@ -35,7 +36,8 @@ defmodule Dstar.Actions do
     Generates a `@#{verb_str}(...)` action expression for Datastar attributes.
 
     CSRF is handled automatically — Datastar sends all signals (including
-    `csrf`) as body params, and `RenameCsrfParam` maps it to `_csrf_token`.
+    `csrf`) as body params on POST/PUT/PATCH and in the `datastar` query
+    parameter on GET/DELETE; `RenameCsrfParam` maps it to `_csrf_token`.
 
     ## With a known module (compile-time):
 
@@ -139,6 +141,37 @@ defmodule Dstar.Actions do
       @nudge_attr => action,
       @nudge_filter_attr => Jason.encode!(%{include: "^nudges\\.#{key}$"})
     }
+  end
+
+  # ── Shared expression builder ────────────────────────────────────────
+
+  @doc false
+  # Shared by `Dstar.Page.Helpers.event/2` and `Dstar.Component.build_event/3`.
+  # Both validate the event name and verb identically and assemble the same
+  # `@verb(<url>, <opts>)` shape — they differ only in `url_expression`, the
+  # JS that computes the target URL in the browser. Kept here so the verb
+  # allowlist has one definition.
+  def build_expression(name, url_expression, opts)
+      when is_binary(name) and is_binary(url_expression) and is_list(opts) do
+    if String.contains?(name, ["'", "/"]) do
+      raise ArgumentError,
+            "event name must not contain \"'\" or \"/\", got: #{inspect(name)}"
+    end
+
+    verb = Keyword.get(opts, :verb, :post)
+
+    unless verb in @verbs do
+      raise ArgumentError,
+            "invalid verb: #{inspect(verb)}. Must be one of #{inspect(@verbs)}"
+    end
+
+    args =
+      case Keyword.get(opts, :opts) do
+        nil -> url_expression
+        extra when is_binary(extra) -> url_expression <> ", " <> extra
+      end
+
+    "@#{verb}(#{args})"
   end
 
   # ── Private ──────────────────────────────────────────────────────────

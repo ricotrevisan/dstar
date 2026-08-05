@@ -452,7 +452,7 @@ end
 
 ## Step 6: Update CSRF Setup
 
-Datastar has **no built-in CSRF support** — it does not read Phoenix's `<meta name="csrf-token">` tag and never sets an `x-csrf-token` header. The token must travel as a signal. The Phoenix meta tag can stay in your layout (other tooling may use it), but Datastar ignores it.
+Phoenix expects the CSRF token in the `_csrf_token` body param — and Datastar can't deliver that: its `_`-prefixed signal keys are front-end-only and never sent to the backend. So the token travels as a non-prefixed signal, and one plug copies it into place. The Phoenix meta tag can stay in your layout (other tooling may use it), but Datastar ignores it.
 
 ```elixir
 # Before — router.ex
@@ -469,7 +469,7 @@ Expose the token as a **non-prefixed** signal in your root layout:
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request body. `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection`. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed. (On GET/DELETE the token rides in the URL, so it lands in access logs and same-origin `Referer` headers; validation is unaffected, but scrub query strings from logs and set a `Referrer-Policy` if that exposure matters.)
 
 Alternatively, pipe Datastar-only routes through a pipeline without `:protect_from_forgery` — simpler, but those endpoints then rely on your session/auth checks alone.
 

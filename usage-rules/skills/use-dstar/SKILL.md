@@ -176,7 +176,7 @@ data-signals:items="[]"          <%!-- Array --%>
 
 ## CSRF Setup
 
-Datastar has **no built-in CSRF support** — it does not read Phoenix's `<meta name="csrf-token">` tag and never sets an `x-csrf-token` header. The token must travel as a signal.
+Phoenix expects the CSRF token in the `_csrf_token` body param — and Datastar can't deliver that: its `_`-prefixed signal keys are front-end-only and never sent to the backend. So the token travels as a non-prefixed signal, and one plug copies it into place.
 
 **Router (before `:protect_from_forgery`):**
 ```elixir
@@ -191,7 +191,9 @@ end
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar will include it in each request body. `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection`. This one setup covers page events, stream connects, component events, and the verb helpers.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and the verb helpers.
+
+Note: on GET/DELETE the token rides in the URL, so it lands in access logs and same-origin `Referer` headers. Validation is unaffected (the token is compared against the session-derived value), but scrub query strings from logs and set a `Referrer-Policy` if that exposure matters.
 
 For Datastar-only routes you can instead use a pipeline without `:protect_from_forgery` — simpler, but those endpoints then rely on your session/auth checks alone.
 

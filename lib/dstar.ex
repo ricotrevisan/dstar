@@ -111,7 +111,8 @@ defmodule Dstar do
   @doc """
   Patches a DOM element on the client via SSE.
 
-  Requires a `:selector` option.
+  Takes a `:selector`, or — with no selector — targets by the `id` on each
+  top-level element of `html`. See `Dstar.Elements.patch/3` for all options.
 
   ## Example
 
@@ -180,10 +181,10 @@ defmodule Dstar do
   ## Examples
 
       Dstar.post(MyAppWeb.CounterHandler, "increment")
-      # => "@post('/ds/my_app_web-counter_handler/increment', {headers: ...})"
+      # => "@post('/ds/my_app_web-counter_handler/increment')"
 
       Dstar.post("increment")
-      # => "@post('/ds/' + $_dstar_module + '/increment', {headers: ...})"
+      # => "@post('/ds/' + $_dstar_module + '/increment')"
 
   """
   defdelegate post(module_or_name, name_or_opts \\ []), to: Dstar.Actions

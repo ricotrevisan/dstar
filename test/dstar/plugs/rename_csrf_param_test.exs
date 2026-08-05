@@ -7,17 +7,28 @@ defmodule Dstar.Plugs.RenameCsrfParamTest do
   describe "init/1" do
     test "defaults to 'csrf' as source param" do
       opts = RenameCsrfParam.init([])
-      assert opts == %{from: "csrf"}
+      assert opts.from == "csrf"
+      assert opts.datastar_param == "datastar"
     end
 
     test "accepts custom :from option" do
       opts = RenameCsrfParam.init(from: "my_token")
-      assert opts == %{from: "my_token"}
+      assert opts.from == "my_token"
     end
 
     test "accepts custom :from option as string" do
       opts = RenameCsrfParam.init(from: "custom_csrf")
-      assert opts == %{from: "custom_csrf"}
+      assert opts == %{from: "custom_csrf", datastar_param: "datastar"}
+    end
+
+    test "accepts custom :datastar_param option" do
+      opts = RenameCsrfParam.init(datastar_param: "ds")
+      assert opts == %{from: "csrf", datastar_param: "ds"}
+    end
+
+    test "defaults include the standard datastar param name" do
+      opts = RenameCsrfParam.init([])
+      assert opts == %{from: "csrf", datastar_param: "datastar"}
     end
   end
 
@@ -165,6 +176,122 @@ defmodule Dstar.Plugs.RenameCsrfParamTest do
       assert result.body_params["_csrf_token"] == "only-token"
       assert result.body_params["csrf"] == "only-token"
       assert map_size(result.body_params) == 2
+    end
+  end
+
+  describe "datastar query param (GET/DELETE)" do
+    setup do
+      opts = RenameCsrfParam.init([])
+      %{opts: opts}
+    end
+
+    test "extracts csrf from the datastar query param on GET", %{opts: opts} do
+      conn =
+        conn(:get, "/test")
+        |> Map.put(:query_params, %{"datastar" => ~s({"csrf":"token-123","count":5})})
+        |> Map.put(:params, %{"datastar" => ~s({"csrf":"token-123","count":5})})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "token-123"
+      assert result.body_params["csrf"] == nil
+    end
+
+    test "extracts csrf from the datastar query param on DELETE", %{opts: opts} do
+      conn =
+        conn(:delete, "/test")
+        |> Map.put(:query_params, %{"datastar" => ~s({"csrf":"token-456"})})
+        |> Map.put(:params, %{"datastar" => ~s({"csrf":"token-456"})})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "token-456"
+    end
+
+    test "works with custom :from via the datastar param", %{} do
+      opts = RenameCsrfParam.init(from: "my_token")
+
+      conn =
+        conn(:delete, "/test")
+        |> Map.put(:params, %{"datastar" => ~s({"my_token":"custom-123"})})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "custom-123"
+    end
+
+    test "works with custom :datastar_param", %{} do
+      opts = RenameCsrfParam.init(datastar_param: "ds")
+
+      conn =
+        conn(:delete, "/test")
+        |> Map.put(:params, %{"ds" => ~s({"csrf":"ds-token"})})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "ds-token"
+    end
+
+    test "handles already-decoded datastar map", %{opts: opts} do
+      conn =
+        conn(:delete, "/test")
+        |> Map.put(:params, %{"datastar" => %{"csrf" => "map-token"}})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "map-token"
+    end
+
+    test "is a no-op when datastar param has no csrf key", %{opts: opts} do
+      conn =
+        conn(:delete, "/test")
+        |> Map.put(:params, %{"datastar" => ~s({"count":5})})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      refute Map.has_key?(result.body_params, "_csrf_token")
+      assert result == conn
+    end
+
+    test "is a no-op when datastar param is malformed JSON", %{opts: opts} do
+      conn =
+        conn(:delete, "/test")
+        |> Map.put(:params, %{"datastar" => "not-json{{"})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      refute Map.has_key?(result.body_params, "_csrf_token")
+      assert result == conn
+    end
+
+    test "prefers top-level csrf param over the datastar param", %{opts: opts} do
+      conn =
+        conn(:post, "/test")
+        |> Map.put(:params, %{"csrf" => "top-level", "datastar" => ~s({"csrf":"nested"})})
+        |> Map.put(:body_params, %{"csrf" => "top-level"})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "top-level"
+    end
+
+    test "existing _csrf_token wins over the datastar param", %{opts: opts} do
+      conn =
+        conn(:delete, "/test")
+        |> Map.put(:params, %{"_csrf_token" => "existing", "datastar" => ~s({"csrf":"nested"})})
+        |> Map.put(:body_params, %{"_csrf_token" => "existing"})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result == conn
+      assert result.body_params["_csrf_token"] == "existing"
     end
   end
 

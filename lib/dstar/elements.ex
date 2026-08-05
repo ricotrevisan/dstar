@@ -64,41 +64,7 @@ defmodule Dstar.Elements do
   """
   @spec patch(Plug.Conn.t(), String.t() | Phoenix.HTML.safe() | nil, keyword()) :: Plug.Conn.t()
   def patch(conn, html, opts \\ []) do
-    html = if is_nil(html), do: nil, else: to_html_string(html)
-    selector = Keyword.get(opts, :selector)
-    mode = Keyword.get(opts, :mode, @default_patch_mode)
-    namespace = Keyword.get(opts, :namespace, :html)
-    use_view_transitions = Keyword.get(opts, :use_view_transitions, @default_use_view_transitions)
-
-    unless mode in @valid_modes do
-      raise ArgumentError, "Invalid patch mode: #{inspect(mode)}"
-    end
-
-    unless namespace in @valid_namespaces do
-      raise ArgumentError,
-            "Invalid namespace: #{inspect(namespace)}. Must be one of #{inspect(@valid_namespaces)}"
-    end
-
-    if is_nil(html) and mode != :remove do
-      raise ArgumentError, "elements content is required unless mode is :remove"
-    end
-
-    data_lines =
-      []
-      |> maybe_add_selector(selector)
-      |> maybe_add_mode(mode)
-      |> maybe_add_namespace(namespace)
-      |> maybe_add_view_transitions(use_view_transitions)
-      |> maybe_add_elements(html)
-
-    event_opts =
-      [
-        event_id: opts[:event_id],
-        retry: opts[:retry]
-      ]
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-
-    SSE.send_event!(conn, @event_type, data_lines, event_opts)
+    SSE.send_event!(conn, @event_type, data_lines(html, opts), event_opts(opts))
   end
 
   @doc """
@@ -176,30 +142,7 @@ defmodule Dstar.Elements do
   """
   @spec format_patch(String.t() | Phoenix.HTML.safe() | nil, keyword()) :: String.t()
   def format_patch(html, opts \\ []) do
-    html = if is_nil(html), do: nil, else: to_html_string(html)
-    selector = Keyword.get(opts, :selector)
-    mode = Keyword.get(opts, :mode, @default_patch_mode)
-    namespace = Keyword.get(opts, :namespace, :html)
-    use_view_transitions = Keyword.get(opts, :use_view_transitions, @default_use_view_transitions)
-
-    unless namespace in @valid_namespaces do
-      raise ArgumentError,
-            "Invalid namespace: #{inspect(namespace)}. Must be one of #{inspect(@valid_namespaces)}"
-    end
-
-    if is_nil(html) and mode != :remove do
-      raise ArgumentError, "elements content is required unless mode is :remove"
-    end
-
-    data_lines =
-      []
-      |> maybe_add_selector(selector)
-      |> maybe_add_mode(mode)
-      |> maybe_add_namespace(namespace)
-      |> maybe_add_view_transitions(use_view_transitions)
-      |> maybe_add_elements(html)
-
-    SSE.format_event(@event_type, data_lines)
+    SSE.format_event(@event_type, data_lines(html, opts))
   end
 
   @doc """
@@ -217,6 +160,45 @@ defmodule Dstar.Elements do
   end
 
   # Private helpers
+
+  # The `data:` payload, shared by patch/3 and format_patch/2 — the two
+  # differ only in how the event gets framed (chunked onto a conn vs.
+  # returned as a string), never in what it contains or what it rejects.
+  # These were separate inlined copies until the validation drifted:
+  # format_patch/2 accepted an invalid `:mode` that patch/3 rejected, and
+  # emitted it on the wire.
+  defp data_lines(html, opts) do
+    html = if is_nil(html), do: nil, else: to_html_string(html)
+    selector = Keyword.get(opts, :selector)
+    mode = Keyword.get(opts, :mode, @default_patch_mode)
+    namespace = Keyword.get(opts, :namespace, :html)
+    use_view_transitions = Keyword.get(opts, :use_view_transitions, @default_use_view_transitions)
+
+    unless mode in @valid_modes do
+      raise ArgumentError, "Invalid patch mode: #{inspect(mode)}"
+    end
+
+    unless namespace in @valid_namespaces do
+      raise ArgumentError,
+            "Invalid namespace: #{inspect(namespace)}. Must be one of #{inspect(@valid_namespaces)}"
+    end
+
+    if is_nil(html) and mode != :remove do
+      raise ArgumentError, "elements content is required unless mode is :remove"
+    end
+
+    []
+    |> maybe_add_selector(selector)
+    |> maybe_add_mode(mode)
+    |> maybe_add_namespace(namespace)
+    |> maybe_add_view_transitions(use_view_transitions)
+    |> maybe_add_elements(html)
+  end
+
+  defp event_opts(opts) do
+    [event_id: opts[:event_id], retry: opts[:retry]]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
 
   defp maybe_add_selector(lines, nil), do: lines
 

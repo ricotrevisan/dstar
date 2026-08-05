@@ -14,7 +14,10 @@ Other libraries give you SSE primitives and leave the rest to you. Dstar gives y
 - **Pages** — `use Dstar.Page` puts render, event handlers, streaming callbacks, and components in one module. One router line wires it.
 - **Event dispatch** — One route, unlimited handlers. `Dstar.Plugs.Dispatch` routes events to handler modules by convention, so you never hand-wire a route per action.
 - **URL generation** — `Dstar.post/2`, `Dstar.get/2`, `Dstar.delete/2` generate `@post(...)` expressions with correct paths. No hand-written URLs in templates.
-- **CSRF handling** — Datastar has no built-in CSRF support, so the token travels as a signal. `Dstar.Plugs.RenameCsrfParam` maps it to where `Plug.CSRFProtection` looks — one plug, one `<body>` attribute, and forgery protection just works.
+- **CSRF handling** — Phoenix wants `_csrf_token`, but Datastar keeps
+  `_`-prefixed signals client-side. So the token travels as a non-prefixed
+  signal, and `Dstar.Plugs.RenameCsrfParam` maps it back — one plug, one
+  `<body>` attribute, and forgery protection just works.
 - **Stream deduplication** — `Dstar.Utility.StreamRegistry` kills zombie SSE processes when users navigate between pages. One process per tab, always.
 - **Console logging** — `Dstar.console_log/2` sends log/warn/error messages straight to the browser DevTools. Debug from the server, read in the browser.
 - **Phoenix.HTML support** — `patch_elements` accepts both raw strings and `Phoenix.HTML.safe()` tuples, so HEEx template output works without conversion.
@@ -195,193 +198,25 @@ Unlike page handlers, component handlers call `start()` themselves — the dispa
 
 *Everything above is built from these functions. Use them directly in plain controllers, custom plugs, or anywhere you have a `%Plug.Conn{}` — pages are optional sugar, the core is the contract.*
 
-Everything goes through the `Dstar` convenience module, which delegates to lower-level modules.
+Everything goes through the `Dstar` convenience module, which delegates to the lower-level modules listed below. Full signatures, options and examples live in the [API docs](https://hexdocs.pm/dstar/Dstar.html) — this table is a map, not a reference.
 
-### `Dstar.start(conn)` → `Plug.Conn.t()`
-
-Opens an SSE connection. Sets `text/event-stream` content type, disables caching, starts a chunked response.
-
-```elixir
-conn = Dstar.start(conn)
-```
-
-### `Dstar.start_stream(conn, scope_key)` → `Plug.Conn.t()`
-
-Like `start/1`, but with per-tab stream deduplication. Kills any previous stream process for the same user+tab before opening a new one. Requires setup — see [Stream Deduplication](#stream-deduplication-optional).
-
-```elixir
-conn = Dstar.start_stream(conn, current_user.id)
-```
-
-### `Dstar.check_connection(conn)` → `{:ok, Plug.Conn.t()} | {:error, Plug.Conn.t()}`
-
-Checks if an SSE connection is still open by sending an SSE comment line. Returns `{:ok, conn}` if the connection is active, `{:error, conn}` if closed or not yet started. Useful for detecting disconnections in streaming loops.
-
-```elixir
-case Dstar.check_connection(conn) do
-  {:ok, conn} ->
-    conn = Dstar.patch_signals(conn, %{data: new_data})
-    loop(conn)
-  
-  {:error, _conn} ->
-    # Client disconnected, clean up
-    Phoenix.PubSub.unsubscribe(MyApp.PubSub, "topic")
-    :ok
-end
-```
-
-### `Dstar.read_signals(conn)` → `map()`
-
-Reads Datastar signals from the request. For `GET` requests, reads from the `datastar` query parameter. For everything else, reads from the JSON body.
-
-```elixir
-signals = Dstar.read_signals(conn)
-count = signals["count"] || 0
-```
-
-### `Dstar.patch_signals(conn, signals, opts \\ [])` → `Plug.Conn.t()`
-
-Sends a `datastar-patch-signals` event. Updates reactive signals on the client.
-
-```elixir
-conn
-|> Dstar.patch_signals(%{count: 42, message: "hello"})
-|> Dstar.patch_signals(%{defaults: true}, only_if_missing: true)
-```
-
-**Options:**
-- `:only_if_missing` — Only patch signals that don't exist on the client (default: `false`)
-- `:event_id` — Event ID for client tracking
-- `:retry` — Retry duration in milliseconds
-
-### `Dstar.remove_signals(conn, paths, opts \\ [])` → `Plug.Conn.t()`
-
-Removes signals from the client by setting them to `nil`. Accepts a single dot-notated path string or a list of paths. Paths with shared prefixes are deep-merged correctly.
-
-```elixir
-# Remove single signal
-conn |> Dstar.remove_signals("user.profile.theme")
-
-# Remove multiple signals
-conn |> Dstar.remove_signals([
-  "user.name",
-  "user.email",
-  "user.profile.avatar"
-])
-
-# Common use case: logout
-conn
-|> Dstar.start()
-|> Dstar.remove_signals(["user", "session", "preferences"])
-|> Dstar.redirect("/login")
-```
-
-Validates paths and raises on empty strings, leading/trailing/consecutive dots.
-
-### `Dstar.patch_elements(conn, html, opts)` → `Plug.Conn.t()`
-
-Sends a `datastar-patch-elements` event. Patches DOM elements on the client. Accepts both binary strings and `Phoenix.HTML.safe()` tuples (e.g., HEEx template output).
-
-```elixir
-conn
-|> Dstar.patch_elements(~s(<span id="count">42</span>), selector: "#count")
-|> Dstar.patch_elements("<li>new item</li>", selector: "ul#items", mode: :append)
-
-# SVG chart update
-svg = "<svg>...</svg>"
-conn |> Dstar.patch_elements(svg, selector: "#chart", namespace: :svg)
-
-# MathML formula
-mathml = "<math>...</math>"
-conn |> Dstar.patch_elements(mathml, selector: "#formula", namespace: :mathml)
-```
-
-**Options:**
-- `:selector` — CSS selector (required)
-- `:mode` — `:outer` (default), `:inner`, `:append`, `:prepend`, `:before`, `:after`, `:replace`, `:remove`
-- `:namespace` — `:html` (default), `:svg`, `:mathml`
-- `:use_view_transitions` — Enable View Transitions API (default: `false`)
-- `:event_id` — Event ID for client tracking
-- `:retry` — Retry duration in milliseconds
-
-### `Dstar.remove_elements(conn, selector, opts \\ [])` → `Plug.Conn.t()`
-
-Sends a `datastar-patch-elements` event that removes matching elements.
-
-```elixir
-conn |> Dstar.remove_elements("#flash-message")
-```
-
-### `Dstar.append_elements(conn, html, container, opts \\ [])` → `Plug.Conn.t()`
-
-Appends an element as the last child of a container.
-
-```elixir
-conn |> Dstar.append_elements(post_row(%{post: post}), "#posts")
-```
-
-### `Dstar.upsert_elements(conn, html, opts \\ [])` → `Plug.Conn.t()`
-
-Morphs the element whose DOM `id` matches the root of `html`. Dropped by the client if this tab never rendered that row.
-
-```elixir
-conn |> Dstar.upsert_elements(post_row(%{post: post}))
-```
-
-### `Dstar.nudge(conn, key, opts \\ [])` → `Plug.Conn.t()`
-
-Signals that a collection changed, without saying how. Each tab re-runs its own load action with its own filter/sort/page signals.
-
-```elixir
-conn |> Dstar.nudge("posts")
-```
-
-### `Dstar.post(module, event_name)` → `String.t()`
-
-Generates a `@post(...)` expression for use in Datastar attributes. All HTTP verbs are available: `Dstar.get/2,3`, `Dstar.put/2,3`, `Dstar.patch/2,3`, `Dstar.delete/2,3` — they all follow the same API.
-
-```elixir
-Dstar.post(MyAppWeb.CounterHandler, "increment")
-# => "@post('/ds/my_app_web-counter_handler/increment')"
-
-Dstar.delete(MyAppWeb.TodoHandler, "remove")
-# => "@delete('/ds/my_app_web-todo_handler/remove')"
-```
-
-Also supports dynamic module references and URL prefixes. See `Dstar.Actions` docs for details.
-
-### `Dstar.execute_script(conn, script, opts \\ [])` → `Plug.Conn.t()`
-
-Executes JavaScript on the client by appending a `<script>` tag via SSE.
-
-```elixir
-conn |> Dstar.execute_script("alert('Hello!')")
-conn |> Dstar.execute_script("console.log('debug')", auto_remove: false)
-```
-
-**Options:**
-- `:auto_remove` — Remove script tag after execution (default: `true`)
-- `:attributes` — Map of additional script tag attributes
-
-### `Dstar.redirect(conn, url, opts \\ [])` → `Plug.Conn.t()`
-
-Redirects the client to the given URL via JavaScript.
-
-```elixir
-conn |> Dstar.redirect("/workspaces")
-```
-
-### `Dstar.console_log(conn, message, opts \\ [])` → `Plug.Conn.t()`
-
-Logs a message to the browser console via SSE.
-
-```elixir
-conn |> Dstar.console_log("Debug info")
-conn |> Dstar.console_log("Warning!", level: :warn)
-```
-
-**Options:**
-- `:level` — `:log` (default), `:warn`, `:error`, `:info`, `:debug`
+| Function | Does |
+|----------|------|
+| `start/1` | Open an SSE connection (`text/event-stream`, no-cache, chunked). |
+| `start_stream/2` | Open an SSE stream with per-tab dedup. Needs `Dstar.Utility.StreamRegistry`. |
+| `check_connection/1` | `{:ok, conn}` / `{:error, conn}` — is the client still there? |
+| `read_signals/1` | Read the request's Datastar signals as a map. |
+| `patch_signals/2,3` | Patch signals on the client. |
+| `remove_signals/2,3` | Remove signals by dot-notated path (or list of paths). |
+| `nudge/2,3` | Tell tabs a collection changed, so each reloads with its own filters. |
+| `patch_elements/3` | Patch DOM elements. Needs a `:selector`, or ids on the HTML roots. |
+| `remove_elements/2,3` | Remove DOM elements by selector. |
+| `append_elements/3,4` | Append HTML as the last child of a container. |
+| `upsert_elements/2,3` | Morph the element whose id matches the HTML root. |
+| `execute_script/2,3` | Run JavaScript on the client. |
+| `redirect/2,3` | Navigate the client to a URL. |
+| `console_log/2,3` | Log to the browser console. |
+| `post/1,2,3` `get/1,2,3` `put/1,2,3` `patch/1,2,3` `delete/1,2,3` | Build `@post(...)`-style action expressions for Datastar attributes. Arity 1 is the dynamic form (`Dstar.post("increment")`), which resolves the module client-side. |
 
 ## Real-time Streaming
 
@@ -626,6 +461,45 @@ config :my_app, MyAppWeb.Endpoint,
    claude mcp add tidewave --transport http http://localhost:4000/tidewave/mcp -s local
    ```
 
+### Alternative: terminate TLS at a local proxy (Caddy)
+
+`mix dstar.https` puts HTTPS inside your app. A local reverse proxy puts
+it in front instead — your app keeps serving plain HTTP on one port, and
+the proxy handles TLS and HTTP/2. The connection limit is browser-side,
+so fixing the browser↔proxy hop is enough.
+
+Prefer this when you run several projects locally, or want zero TLS
+config in the app.
+
+1. Install and trust Caddy's local CA (once, for all projects):
+
+   ```bash
+   brew install caddy
+   sudo caddy trust
+   ```
+
+2. Create a `Caddyfile` (e.g. `/opt/homebrew/etc/Caddyfile`):
+
+   ```
+   my-app.localhost {
+       reverse_proxy localhost:4000
+   }
+   ```
+
+3. Run it: `brew services start caddy`
+
+4. Tell Phoenix its public URL in `config/dev.exs` (keep the `http:` key):
+
+   ```elixir
+   url: [host: "my-app.localhost", port: 443, scheme: "https"],
+   ```
+
+Open `https://my-app.localhost`. No `/etc/hosts` edits — `*.localhost`
+always resolves to loopback. No per-project certs — every future project
+is one more 3-line block. Caddy auto-detects `text/event-stream` and
+streams SSE unbuffered. And since the app itself stays plain HTTP,
+Tidewave's MCP endpoint keeps working with no reconfiguration.
+
 ### Verify HTTP/2 is active
 
 Open DevTools → Network tab → right-click column headers → enable
@@ -669,10 +543,11 @@ you full routing control. Both use the same Dstar functions underneath.
 
 ## CSRF Protection Setup
 
-Datastar has **no built-in CSRF support** — it does not read Phoenix's
-`<meta name="csrf-token">` tag and never sets an `x-csrf-token` header.
-(Verified against the v1 bundle: zero references to CSRF.) The token must
-travel as a signal.
+Phoenix expects the CSRF token in the `_csrf_token` body param — and
+Datastar can't deliver that: its `_`-prefixed signal keys are
+front-end-only and never sent to the backend. So we do a little shimming:
+carry the token as a non-prefixed signal, and one plug copies it into
+`_csrf_token` before `Plug.CSRFProtection` runs.
 
 ### The signal pattern (pages, components, and helper routes alike)
 
@@ -689,10 +564,35 @@ plug :protect_from_forgery
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request
-body. The plug copies it to `body_params["_csrf_token"]`, where
-`Plug.CSRFProtection` looks. This one setup covers page `event()` POSTs,
-stream `connect()` POSTs, component events, and the verb helpers.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request.
+How it travels depends on the HTTP method:
+
+- **POST / PUT / PATCH** — in the JSON request body, as a top-level param.
+- **GET / DELETE** — in the `datastar` URL query parameter (`?datastar={...}`),
+  since these methods carry no body.
+
+The plug copies the token into `body_params["_csrf_token"]` from either
+channel, where `Plug.CSRFProtection` looks. This one setup covers page
+`event()` POSTs, stream `connect()` POSTs, component events, and the verb
+helpers — including `Dstar.delete/2,3`, which `:protect_from_forgery` does
+check.
+
+#### A note on GET/DELETE and the token in URLs
+
+The token riding on every request is the point of this setup, but on
+GET/DELETE that means a per-session credential ends up in the **URL query
+string**, which flows into server/proxy access logs and same-origin
+`Referer` headers. Validation is unaffected — `Plug.CSRFProtection` still
+compares the token cryptographically against the session-derived value —
+but if that exposure matters to you:
+
+- Scrub query strings (or at least the `datastar` param) from access/proxy
+  logs.
+- Set an explicit `Referrer-Policy` header (e.g. `same-origin` or
+  `no-referrer`).
+- For maximum hygiene, transport the token as an `x-csrf-token` header via
+  a small custom Datastar action — `Plug.CSRFProtection` accepts that
+  header directly, and it never touches a URL.
 
 ### Or: skip CSRF for SSE-only routes
 
@@ -712,9 +612,9 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.Router` | `dstar/2` (page routes), `dstar_components/2` (dispatch route) |
 | `Dstar.Test` | `sse_events/1`, `patched_signals/1`, `assert_patched_signals/2`, `assert_patched_element/2` |
 | `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2` |
-| `Dstar.Signals` | `read/1`, `patch/2,3`, `patch_raw/2,3`, `format_patch/1,2`, `remove_signals/2,3`, `format_remove/1,2` |
-| `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `format_patch/1,2` |
-| `Dstar.Actions` | `post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`, `encode_module/1`, `decode_module/1` |
+| `Dstar.Signals` | `read/1`, `patch/2,3`, `patch_raw/2,3`, `nudge/2,3`, `remove_signals/2,3`, `format_patch/1,2`, `format_remove/1,2` |
+| `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `append/3,4`, `upsert/2,3`, `format_patch/1,2`, `format_remove/1,2` |
+| `Dstar.Actions` | `post/1,2,3`, `get/1,2,3`, `put/1,2,3`, `patch/1,2,3`, `delete/1,2,3`, `on_nudge/2`, `encode_module/1`, `decode_module/1` |
 | `Dstar.Scripts` | `execute/2,3`, `redirect/2,3`, `console_log/2,3` |
 | `Dstar.Plugs.Dispatch` | Standard Plug for dynamic event routing |
 | `Dstar.Plugs.RenameCsrfParam` | Standard Plug for CSRF param compatibility |

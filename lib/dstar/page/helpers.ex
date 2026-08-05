@@ -8,8 +8,6 @@ defmodule Dstar.Page.Helpers do
   - `patch/3,4` — render a function component into a `patch_elements` call.
   """
 
-  @verbs ~w(get post put patch delete)a
-
   @doc """
   Builds a page-local Datastar action expression.
 
@@ -34,27 +32,11 @@ defmodule Dstar.Page.Helpers do
     e.g. `"{indicator: 'saving'}"`
   """
   def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
-    if String.contains?(name, ["'", "/"]) do
-      raise ArgumentError,
-            "event name must not contain \"'\" or \"/\", got: #{inspect(name)}"
-    end
-
-    verb = Keyword.get(opts, :verb, :post)
-
-    unless verb in @verbs do
-      raise ArgumentError,
-            "invalid verb: #{inspect(verb)}. Must be one of #{inspect(@verbs)}"
-    end
-
-    args = "location.pathname.replace(/\\/+$/, '') + '/_event/#{name}'"
-
-    args =
-      case Keyword.get(opts, :opts) do
-        nil -> args
-        extra when is_binary(extra) -> args <> ", " <> extra
-      end
-
-    "@#{verb}(#{args})"
+    Dstar.Actions.build_expression(
+      name,
+      "location.pathname.replace(/\\/+$/, '') + '/_event/#{name}'",
+      opts
+    )
   end
 
   @doc """

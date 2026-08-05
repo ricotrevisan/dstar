@@ -126,23 +126,40 @@ defmodule Dstar.SSETest do
   end
 
   describe "send_event/4" do
-    test "suppresses retry when set to default 1000ms" do
-      conn =
-        conn(:post, "/test")
-        |> SSE.start()
+    # Per the Datastar SDK ADR, `retry:` is emitted only when it differs from
+    # the SDK default of 1000. The official Go golden suite asserts this.
+    test "omits retry when it equals the Datastar default of 1000" do
+      conn = conn(:post, "/test") |> SSE.start()
 
-      # retry: 1000 is the SSE default — should not appear in output
       {:ok, result} = SSE.send_event(conn, "test-event", ["data"], retry: 1000)
-      assert %Plug.Conn{state: :chunked} = result
+      assert result.resp_body == "event: test-event\ndata: data\n\n"
+    end
+
+    # Documents the known consequence of the rule above: EventSource persists
+    # the reconnection time, so an elevated retry cannot be lowered back to
+    # the default — the field is omitted rather than re-sent.
+    test "retry: 1000 does not reset a previously elevated retry" do
+      conn = conn(:post, "/test") |> SSE.start()
+
+      {:ok, conn} = SSE.send_event(conn, "a", ["x"], retry: 5000)
+      {:ok, result} = SSE.send_event(conn, "b", ["y"], retry: 1000)
+
+      assert result.resp_body ==
+               "event: a\nretry: 5000\ndata: x\n\n" <> "event: b\ndata: y\n\n"
+    end
+
+    test "omits retry when none is given" do
+      conn = conn(:post, "/test") |> SSE.start()
+
+      {:ok, result} = SSE.send_event(conn, "test-event", ["data"])
+      refute result.resp_body =~ "retry:"
     end
 
     test "includes retry when set to non-default value" do
-      conn =
-        conn(:post, "/test")
-        |> SSE.start()
+      conn = conn(:post, "/test") |> SSE.start()
 
       {:ok, result} = SSE.send_event(conn, "test-event", ["data"], retry: 5000)
-      assert %Plug.Conn{state: :chunked} = result
+      assert result.resp_body == "event: test-event\nretry: 5000\ndata: data\n\n"
     end
   end
 

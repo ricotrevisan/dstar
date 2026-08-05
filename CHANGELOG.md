@@ -1,5 +1,64 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`Dstar.Scripts.console_log/3` raises on an unknown `:level`.** It previously
+  fell back to `:log` silently, which hid the typo instead of the message —
+  notably `level: :warning`, Elixir's own `Logger` spelling, which is not a
+  `console` method. Valid levels are unchanged (`:log`, `:warn`, `:error`,
+  `:info`, `:debug`); anything else now raises `ArgumentError`, matching how
+  `:mode`, `:namespace` and `:verb` are already validated elsewhere.
+
+  This is a runtime-breaking change for callers passing an invalid level. If
+  you have such a call inside a stream, the raise will end that stream.
+
+- **`Dstar.Elements.format_patch/2` validates `:mode`.** It shared no code with
+  `Dstar.Elements.patch/3` and had drifted: an invalid mode that `patch/3`
+  rejects was accepted and written to the wire as `data: mode <junk>`. Both now
+  build their data lines from one function, so `format_patch/2` raises on the
+  same input `patch/3` does. This also means a mode passed as a **string**
+  (`mode: "outer"`) is now rejected — previously it produced valid output.
+
+### Fixed
+
+- **`Dstar.Plugs.RenameCsrfParam` now extracts the token from the `datastar`
+  query parameter.** Datastar v1.0 sends signals in the JSON request body
+  for POST/PUT/PATCH but in the `datastar` URL query parameter for
+  GET/DELETE (those methods carry no body). The plug previously only looked
+  for a top-level `csrf` param, so DELETE requests — which
+  `Plug.CSRFProtection` *does* check — could not be validated and were
+  rejected under `:protect_from_forgery`. The plug now decodes the
+  `datastar` param and copies the token into `body_params["_csrf_token"]`
+  from either channel. New option: `:datastar_param` (default
+  `"datastar"`).
+
+- **CSRF docs corrected.** README, usage rules, and the migration guide
+  claimed Datastar includes the token in *every request body*; it is a body
+  param on POST/PUT/PATCH and a `datastar` query parameter on GET/DELETE.
+  Docs now describe both channels, note that the token rides in the URL on
+  GET/DELETE (access logs, same-origin `Referer` headers), and list
+  hardening options (log scrubbing, `Referrer-Policy`, `x-csrf-token`
+  header transport).
+
+- **`Dstar` docs.** The moduledoc advertised `@post(...)` output carrying a
+  `{headers: ...}` option, removed back when CSRF moved to the signal-based
+  approach, and `patch_elements/3` was documented as requiring a `:selector`
+  when it also targets by element `id`. The README's module tables were missing
+  `nudge/2,3`, `append/3,4`, `upsert/2,3`, `format_remove/1,2`, `on_nudge/2`
+  and the arity-1 dynamic verb forms.
+
+### Internal
+
+- `Dstar.Elements` and `Dstar.Signals` each built their SSE data lines from two
+  inlined copies (`patch` and `format_patch`); both pairs now share one builder.
+- `Dstar.Page.Helpers.event/2` and `Dstar.Component`'s `event/2` were the same
+  function twice; both now call one shared builder in `Dstar.Actions`, and the
+  verb allowlist has one definition instead of three.
+- Vendored `deps/` (429 files) were tracked in git despite being gitignored;
+  removed from the index.
+
 ## 0.1.6 — 2026-07-25
 
 ### Documentation

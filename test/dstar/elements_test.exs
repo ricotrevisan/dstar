@@ -124,6 +124,15 @@ defmodule Dstar.ElementsTest do
       end
     end
 
+    # patch/3 has always rejected this; format_patch/2 used to accept it and
+    # emit `mode bogus` on the wire, because the two built their data lines
+    # from separate inlined copies of the same logic.
+    test "raises on invalid mode, like patch/3" do
+      assert_raise ArgumentError, ~r/Invalid patch mode/, fn ->
+        Elements.format_patch("<div id=\"a\">x</div>", mode: :bogus)
+      end
+    end
+
     test "raises when html is nil and mode is not :remove" do
       assert_raise ArgumentError, ~r/elements content is required/, fn ->
         Elements.format_patch(nil, selector: "#x", mode: :inner)
