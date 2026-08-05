@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-08-05
+
 ### Changed
 
 - **`Dstar.Scripts.console_log/3` raises on an unknown `:level`.** It previously

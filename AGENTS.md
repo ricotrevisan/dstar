@@ -90,5 +90,6 @@ Behavior changes need matching updates in all of these, or CI/docs drift:
 - **Never commit `deps/`** — it was tracked once by mistake and untracked in
   `287ea40`. `doc/` is ExDoc build output; regenerate it with `mix docs`, don't
   edit it by hand. Both are gitignored.
-- Releases: bump `@version` in `mix.exs`, add a `Release 0.1.x` CHANGELOG
-  entry, commit, tag `v0.1.x`.
+- Releases: bump `@version` in `mix.exs`, add a dated CHANGELOG section,
+  publish the package and docs, tag `vX.Y.Z`, and create the matching GitHub
+  Release.
