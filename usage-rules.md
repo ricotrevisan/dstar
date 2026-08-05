@@ -125,7 +125,8 @@ All functions in `Dstar` module:
 
 ## CSRF Setup
 
-Datastar has **no built-in CSRF support** — it does not read Phoenix's
+CSRF protection isn't Datastar's job — it's a wire protocol with no opinion
+on sessions, so it doesn't read Phoenix's
 `<meta name="csrf-token">` tag and never sets an `x-csrf-token` header.
 The token must travel as a signal.
 
