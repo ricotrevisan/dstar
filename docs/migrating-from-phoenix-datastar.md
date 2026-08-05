@@ -469,7 +469,7 @@ Expose the token as a **non-prefixed** signal in your root layout:
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request body. `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection`. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed. (On GET/DELETE the token rides in the URL, so it lands in access logs and same-origin `Referer` headers; validation is unaffected, but scrub query strings from logs and set a `Referrer-Policy` if that exposure matters.)
 
 Alternatively, pipe Datastar-only routes through a pipeline without `:protect_from_forgery` — simpler, but those endpoints then rely on your session/auth checks alone.
 

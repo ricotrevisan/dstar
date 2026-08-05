@@ -458,6 +458,45 @@ config :my_app, MyAppWeb.Endpoint,
    claude mcp add tidewave --transport http http://localhost:4000/tidewave/mcp -s local
    ```
 
+### Alternative: terminate TLS at a local proxy (Caddy)
+
+`mix dstar.https` puts HTTPS inside your app. A local reverse proxy puts
+it in front instead — your app keeps serving plain HTTP on one port, and
+the proxy handles TLS and HTTP/2. The connection limit is browser-side,
+so fixing the browser↔proxy hop is enough.
+
+Prefer this when you run several projects locally, or want zero TLS
+config in the app.
+
+1. Install and trust Caddy's local CA (once, for all projects):
+
+   ```bash
+   brew install caddy
+   sudo caddy trust
+   ```
+
+2. Create a `Caddyfile` (e.g. `/opt/homebrew/etc/Caddyfile`):
+
+   ```
+   my-app.localhost {
+       reverse_proxy localhost:4000
+   }
+   ```
+
+3. Run it: `brew services start caddy`
+
+4. Tell Phoenix its public URL in `config/dev.exs` (keep the `http:` key):
+
+   ```elixir
+   url: [host: "my-app.localhost", port: 443, scheme: "https"],
+   ```
+
+Open `https://my-app.localhost`. No `/etc/hosts` edits — `*.localhost`
+always resolves to loopback. No per-project certs — every future project
+is one more 3-line block. Caddy auto-detects `text/event-stream` and
+streams SSE unbuffered. And since the app itself stays plain HTTP,
+Tidewave's MCP endpoint keeps working with no reconfiguration.
+
 ### Verify HTTP/2 is active
 
 Open DevTools → Network tab → right-click column headers → enable
@@ -521,10 +560,35 @@ plug :protect_from_forgery
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request
-body. The plug copies it to `body_params["_csrf_token"]`, where
-`Plug.CSRFProtection` looks. This one setup covers page `event()` POSTs,
-stream `connect()` POSTs, component events, and the verb helpers.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request.
+How it travels depends on the HTTP method:
+
+- **POST / PUT / PATCH** — in the JSON request body, as a top-level param.
+- **GET / DELETE** — in the `datastar` URL query parameter (`?datastar={...}`),
+  since these methods carry no body.
+
+The plug copies the token into `body_params["_csrf_token"]` from either
+channel, where `Plug.CSRFProtection` looks. This one setup covers page
+`event()` POSTs, stream `connect()` POSTs, component events, and the verb
+helpers — including `Dstar.delete/2,3`, which `:protect_from_forgery` does
+check.
+
+#### A note on GET/DELETE and the token in URLs
+
+The token riding on every request is the point of this setup, but on
+GET/DELETE that means a per-session credential ends up in the **URL query
+string**, which flows into server/proxy access logs and same-origin
+`Referer` headers. Validation is unaffected — `Plug.CSRFProtection` still
+compares the token cryptographically against the session-derived value —
+but if that exposure matters to you:
+
+- Scrub query strings (or at least the `datastar` param) from access/proxy
+  logs.
+- Set an explicit `Referrer-Policy` header (e.g. `same-origin` or
+  `no-referrer`).
+- For maximum hygiene, transport the token as an `x-csrf-token` header via
+  a small custom Datastar action — `Plug.CSRFProtection` accepts that
+  header directly, and it never touches a URL.
 
 ### Or: skip CSRF for SSE-only routes
 

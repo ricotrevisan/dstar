@@ -16,8 +16,9 @@ defmodule Dstar.Actions do
   """
 
   # No explicit CSRF header needed — Datastar sends all signals (including
-  # `csrf`) as body params on every @post. The `RenameCsrfParam` plug copies
-  # the `csrf` param into `_csrf_token` for `Plug.CSRFProtection`.
+  # `csrf`) as body params on POST/PUT/PATCH and in the `datastar` query
+  # parameter on GET/DELETE. The `RenameCsrfParam` plug copies the token
+  # into `_csrf_token` for `Plug.CSRFProtection` from either channel.
   #
   # To set up the token, add this signal to your root layout:
   #
@@ -35,7 +36,8 @@ defmodule Dstar.Actions do
     Generates a `@#{verb_str}(...)` action expression for Datastar attributes.
 
     CSRF is handled automatically — Datastar sends all signals (including
-    `csrf`) as body params, and `RenameCsrfParam` maps it to `_csrf_token`.
+    `csrf`) as body params on POST/PUT/PATCH and in the `datastar` query
+    parameter on GET/DELETE; `RenameCsrfParam` maps it to `_csrf_token`.
 
     ## With a known module (compile-time):
 

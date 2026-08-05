@@ -23,6 +23,25 @@
 
 ### Fixed
 
+- **`Dstar.Plugs.RenameCsrfParam` now extracts the token from the `datastar`
+  query parameter.** Datastar v1.0 sends signals in the JSON request body
+  for POST/PUT/PATCH but in the `datastar` URL query parameter for
+  GET/DELETE (those methods carry no body). The plug previously only looked
+  for a top-level `csrf` param, so DELETE requests — which
+  `Plug.CSRFProtection` *does* check — could not be validated and were
+  rejected under `:protect_from_forgery`. The plug now decodes the
+  `datastar` param and copies the token into `body_params["_csrf_token"]`
+  from either channel. New option: `:datastar_param` (default
+  `"datastar"`).
+
+- **CSRF docs corrected.** README, usage rules, and the migration guide
+  claimed Datastar includes the token in *every request body*; it is a body
+  param on POST/PUT/PATCH and a `datastar` query parameter on GET/DELETE.
+  Docs now describe both channels, note that the token rides in the URL on
+  GET/DELETE (access logs, same-origin `Referer` headers), and list
+  hardening options (log scrubbing, `Referrer-Policy`, `x-csrf-token`
+  header transport).
+
 - **`Dstar` docs.** The moduledoc advertised `@post(...)` output carrying a
   `{headers: ...}` option, removed back when CSRF moved to the signal-based
   approach, and `patch_elements/3` was documented as requiring a `:selector`
