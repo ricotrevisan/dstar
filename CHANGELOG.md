@@ -30,7 +30,8 @@
   Default: same-origin path-absolute URLs, plus query/fragment on the current
   path (`/workspaces`, `?x=1`, `#frag`). Rejected: `javascript:`/`data:`/
   `vbscript:` (including mixed-case and whitespace/control-obfuscated forms),
-  protocol-relative URLs (`//evil.example`), URLs with userinfo
+  protocol-relative URLs (`//evil.example`, including tab/LF/CR smuggled
+  into a path so browsers parse `/\n/evil` as `//evil`), URLs with userinfo
   (`https://trusted.example@evil.example/`), and off-origin `http`/`https`.
   Off-origin `http`/`https` requires `external: true` or `allow: ["host"]`.
   `execute_script/3` is unchanged (trusted-code API).

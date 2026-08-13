@@ -94,7 +94,8 @@ defmodule Dstar.Scripts do
     * `javascript:`, `data:`, `vbscript:` (any case)
     * those schemes hidden behind leading, control, or Unicode whitespace
       (`"  DATA:…"`, `"JavaScript:…"`, `"java\\tscript:…"`)
-    * protocol-relative URLs (`//evil.example`)
+    * protocol-relative URLs (`//evil.example`, including tab/LF/CR
+      smuggled into a path so browsers parse `/\n/evil` as `//evil`)
     * URLs with userinfo (`https://trusted.example@evil.example/`)
     * off-origin `http`/`https` (including `https://example.com`)
 
@@ -277,37 +278,39 @@ defmodule Dstar.Scripts do
   defp validate_destination!(conn, url, opts) do
     allow = fetch_allow!(opts)
     external? = Keyword.get(opts, :external, false) == true
-
     codepoints = utf8_codepoints!(url)
 
-    if url == "" or (codepoints != [] and ignorable_char?(hd(codepoints))) do
-      raise_unsafe_redirect(url)
-    end
-
-    # Browsers strip tabs/newlines (and similar) before parsing, so
-    # `java\tscript:alert(1)` becomes `javascript:alert(1)`. Classify the
-    # stripped form as well as the raw parse.
+    # Browsers strip tab/LF/CR anywhere before parsing, so "/\n/evil.example"
+    # becomes "//evil.example". Classify both the raw string and the
+    # ignorable-stripped form; emit the original only if both are allowed.
     stripped = codepoints |> Enum.reject(&ignorable_char?/1) |> List.to_string()
-    reject_if_bad_scheme!(URI.parse(stripped), url)
 
-    uri = URI.parse(url)
-    reject_if_bad_scheme!(uri, url)
+    Enum.each(Enum.uniq([url, stripped]), fn candidate ->
+      uri = URI.parse(candidate)
+      reject_if_bad_scheme!(uri, url)
 
+      unless destination_allowed?(conn, uri, external?, allow) do
+        raise_unsafe_redirect(url)
+      end
+    end)
+  end
+
+  defp destination_allowed?(conn, uri, external?, allow) do
     cond do
       not is_nil(uri.userinfo) ->
-        raise_unsafe_redirect(url)
+        false
 
       protocol_relative?(uri) ->
-        raise_unsafe_redirect(url)
+        false
 
       local_destination?(conn, uri) ->
-        :ok
+        true
 
       http_destination?(uri) and (external? or host_allowed?(uri, allow)) ->
-        :ok
+        true
 
       true ->
-        raise_unsafe_redirect(url)
+        false
     end
   end
 
