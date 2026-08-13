@@ -19,17 +19,17 @@ defmodule Dstar.Page.HelpersTest do
   describe "event/1,2" do
     test "builds a page-local @post expression" do
       assert event("increment") ==
-               "@post(location.pathname.replace(/\\/+$/, '') + '/_event/increment')"
+               ~S|@post(location.pathname.replace(/^\/+/, '/').replace(/\/+$/, '') + "/_event/increment")|
     end
 
     test "supports event names with interpolated ids" do
       assert event("toggle_item:123") ==
-               "@post(location.pathname.replace(/\\/+$/, '') + '/_event/toggle_item:123')"
+               ~S|@post(location.pathname.replace(/^\/+/, '/').replace(/\/+$/, '') + "/_event/toggle_item%3A123")|
     end
 
     test "supports verb override" do
       assert event("remove", verb: :delete) ==
-               "@delete(location.pathname.replace(/\\/+$/, '') + '/_event/remove')"
+               ~S|@delete(location.pathname.replace(/^\/+/, '/').replace(/\/+$/, '') + "/_event/remove")|
     end
 
     test "raises on unknown verb" do
@@ -38,31 +38,47 @@ defmodule Dstar.Page.HelpersTest do
 
     test "appends raw options object" do
       assert event("save", opts: "{retryMaxCount: 5}") ==
-               "@post(location.pathname.replace(/\\/+$/, '') + '/_event/save', {retryMaxCount: 5})"
+               ~S|@post(location.pathname.replace(/^\/+/, '/').replace(/\/+$/, '') + "/_event/save", {retryMaxCount: 5})|
     end
 
-    test "raises on event name containing a single quote" do
-      assert_raise ArgumentError, fn -> event("bad'name") end
+    test "rejects missing and dot event segments" do
+      for value <- ["", ".", ".."] do
+        assert_raise ArgumentError, ~r/path segment/, fn -> event(value) end
+      end
     end
 
-    test "raises on event name containing a slash" do
-      assert_raise ArgumentError, fn -> event("bad/name") end
+    test "requires raw options to be a trusted JavaScript string" do
+      assert_raise ArgumentError, ~r/:opts must be a trusted JavaScript string/, fn ->
+        event("save", opts: %{retryMaxCount: 5})
+      end
+    end
+
+    test "encodes URL-significant event names as one literal segment" do
+      assert event("bad'name/..\\?x#y%2f\r\n東京") ==
+               ~S|@post(location.pathname.replace(/^\/+/, '/').replace(/\/+$/, '') + "/_event/bad%27name%2F%2E%2E%5C%3Fx%23y%252f%0D%0A%E6%9D%B1%E4%BA%AC")|
     end
   end
 
   describe "connect/0,1" do
     test "builds the stream connect expression" do
-      assert connect() == "@post(location.pathname, {retryMaxCount: Infinity})"
+      assert connect() ==
+               ~S|@post(location.pathname.replace(/^\/+/, '/'), {retryMaxCount: Infinity})|
     end
 
     test "allows overriding the options object" do
       assert connect(opts: "{retryMaxCount: 3}") ==
-               "@post(location.pathname, {retryMaxCount: 3})"
+               ~S|@post(location.pathname.replace(/^\/+/, '/'), {retryMaxCount: 3})|
+    end
+
+    test "requires an override to be a trusted JavaScript string" do
+      assert_raise ArgumentError, ~r/:opts must be a trusted JavaScript string/, fn ->
+        connect(opts: %{retryMaxCount: 3})
+      end
     end
 
     test "include_search appends location.search" do
       assert connect(include_search: true) ==
-               "@post(location.pathname + location.search, {retryMaxCount: Infinity})"
+               ~S|@post(location.pathname.replace(/^\/+/, '/') + location.search, {retryMaxCount: Infinity})|
     end
   end
 

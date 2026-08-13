@@ -50,11 +50,13 @@ end
 
 ### HTTP Verb Helpers
 
-- `Dstar.post(MyHandler, "increment")` → `"@post('/ds/my_handler/increment', {...})"`
-- `Dstar.delete(MyHandler, "remove")` → `"@delete('/ds/my_handler/remove', {...})"`
-- `Dstar.post(MyHandler, "save", prefix: "/workspace")` — URL prefix
-- `Dstar.post("increment")` — Dynamic module (reads `$_dstar_module` signal from client)
-- All HTTP verbs available: `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`
+- `Dstar.post(MyHandler, "increment")` → `~s|@post("/ds/my_handler/increment")|`
+- `Dstar.delete(MyHandler, "remove")` — Same path rules, different verb.
+- `Dstar.post(MyHandler, "save", prefix: "/workspace")` — Prefix must be a local absolute app path beginning with one `/`; never a URL, dot segment, query, fragment, backslash, or data-derived origin; percent escapes must be valid UTF-8.
+- `Dstar.post("increment")` — Dynamic module; reads and percent-encodes `$_dstar_module` in the browser. `module:` is a literal module override, not JavaScript.
+- Event and module values are UTF-8 percent-encoded as one route segment. Empty, `.` and `..` are rejected because browsers normalize them.
+- Page/Component `event(..., opts: "...")` and `connect(opts: "...")` accept raw **trusted developer JavaScript only**. Never put request, stored, or user data in `:opts`.
+- All HTTP verbs available: `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`.
 
 ## Controller Patterns
 

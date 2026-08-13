@@ -262,6 +262,15 @@ end
 
 > **Note:** The `handle_event/3` signature is different — Dstar passes `(conn, event, signals)` instead of PhoenixDatastar's `(event, payload, socket)`.
 
+Dstar's core, Page, and Component action helpers encode event and module values
+as one UTF-8 URL segment; the handler receives the decoded original. This is a
+compatibility change if code compared the emitted expression string or expected
+slashes/query/fragment characters to alter routing. Empty, `.` and `..` values
+now raise because browsers normalize them. The dynamic form encodes
+`$_dstar_module` at runtime, while `module:` is a literal override. A `prefix:`
+must be a local absolute app path beginning with one `/`; external,
+protocol-relative, dot-segment, backslash, query, fragment, and control-containing, malformed-percent, and non-UTF-8 prefixes are rejected.
+
 ### Live views (with PubSub)
 
 Live views require the most thought. PhoenixDatastar managed a GenServer per session with persistent SSE. In Dstar, **you manage the SSE loop yourself**.
@@ -410,6 +419,10 @@ post "/game/stream", GameStreamController, :stream
 <%!-- After — using dynamic dispatch --%>
 <button data-on:click={Dstar.post(MyAppWeb.CounterHandler, "increment")}>+</button>
 ```
+
+For Page/Component events, `opts: "..."` (and Page `connect(opts: "...")`) is
+raw executable JavaScript for trusted developer configuration only. Do not
+interpolate request, stored, slug, or user data into it.
 
 ### Navigation links
 

@@ -42,7 +42,7 @@ defmodule Dstar.ActionsTest do
       test "generates a #{verb_str} action with encoded module" do
         result = apply(Actions, unquote(verb), [MyApp.CounterView, "increment"])
         encoded = Actions.encode_module(MyApp.CounterView)
-        assert result == "@#{unquote(verb_str)}('/ds/#{encoded}/increment')"
+        assert result == ~s|@#{unquote(verb_str)}("/ds/#{encoded}/increment")|
       end
     end
 
@@ -50,7 +50,7 @@ defmodule Dstar.ActionsTest do
       test "generates a #{verb_str} action with prefix" do
         result = apply(Actions, unquote(verb), [MyApp.CounterView, "increment", [prefix: "/ws"]])
         encoded = Actions.encode_module(MyApp.CounterView)
-        assert result == "@#{unquote(verb_str)}('/ws/ds/#{encoded}/increment')"
+        assert result == ~s|@#{unquote(verb_str)}("/ws/ds/#{encoded}/increment")|
       end
     end
 
@@ -58,13 +58,111 @@ defmodule Dstar.ActionsTest do
       test "generates a #{verb_str} action with dynamic module signal" do
         result = apply(Actions, unquote(verb), ["increment"])
 
-        assert result ==
-                 "@#{unquote(verb_str)}('/ds/' + $_dstar_module + '/increment')"
+        assert String.starts_with?(
+                 result,
+                 ~s|@#{unquote(verb_str)}("/ds" + "/" + ((segment) =>|
+               )
+
+        assert result =~ "invalid Dstar module segment"
+        assert result =~ "encodeURIComponent(segment)"
+        assert String.ends_with?(result, ~S|($_dstar_module) + "/increment")|)
       end
 
-      test "generates #{verb_str} with custom module signal" do
+      test "generates #{verb_str} with a literal custom module" do
         result = apply(Actions, unquote(verb), ["save", [module: "my_module"]])
-        assert result == "@#{unquote(verb_str)}('/ds/my_module/save')"
+        assert result == ~s|@#{unquote(verb_str)}("/ds/my_module/save")|
+      end
+
+      test "preserves the explicit default dynamic module expression" do
+        assert apply(Actions, unquote(verb), ["save", [module: "$_dstar_module"]]) ==
+                 apply(Actions, unquote(verb), ["save"])
+      end
+    end
+  end
+
+  describe "action URL safety" do
+    test "serializes caller-provided text instead of interpolating it into the expression" do
+      payload = "x');alert(document.domain);//"
+      prefix = "');alert(1);//"
+      module = "x');alert(1);//"
+
+      assert Actions.post(String, payload) ==
+               ~S|@post("/ds/string/x%27%29%3Balert%28document%2Edomain%29%3B%2F%2F")|
+
+      assert_raise ArgumentError, ~r/prefix/, fn ->
+        Actions.post(String, "save", prefix: prefix)
+      end
+
+      assert Actions.post("save", module: module) ==
+               ~S|@post("/ds/x%27%29%3Balert%281%29%3B%2F%2F/save")|
+    end
+
+    test "encodes every event and literal module value as one route segment" do
+      values = [
+        {"/", "%2F"},
+        {"\\", "%5C"},
+        {"a..b", "a%2E%2Eb"},
+        {"?", "%3F"},
+        {"#", "%23"},
+        {"%2f", "%252f"},
+        {"\r\n", "%0D%0A"},
+        {"'\"", "%27%22"},
+        {"café/東京", "caf%C3%A9%2F%E6%9D%B1%E4%BA%AC"}
+      ]
+
+      for {value, encoded} <- values do
+        assert Actions.post(String, value) == ~s|@post("/ds/string/#{encoded}")|
+        assert Actions.post("save", module: value) == ~s|@post("/ds/#{encoded}/save")|
+      end
+    end
+
+    test "accepts only local absolute path prefixes" do
+      for prefix <- [
+            "//evil.test",
+            "https://evil.test",
+            "relative",
+            "",
+            "/x?y",
+            "/x#y",
+            "/\\evil",
+            "/x\ny",
+            "/%2F%2Fevil.test",
+            "/x%3Fy",
+            "/x%23y",
+            "/x%0Ay",
+            "/%5Cevil.test",
+            "/bad%",
+            "/%ZZ",
+            "/%FF",
+            "/a/../admin",
+            "/a/%2E%2E/admin",
+            "/./admin"
+          ] do
+        assert_raise ArgumentError, ~r/:prefix must be a local absolute path/, fn ->
+          Actions.post(String, "save", prefix: prefix)
+        end
+      end
+
+      assert Actions.post(String, "save", prefix: "/workspace/") ==
+               ~S|@post("/workspace/ds/string/save")|
+
+      assert Actions.post(String, "save", prefix: "/") == Actions.post(String, "save")
+
+      assert Actions.post(String, "save", prefix: "/caf%C3%A9") ==
+               ~S|@post("/caf%C3%A9/ds/string/save")|
+    end
+
+    test "encodes unusual module atoms through the same segment rules" do
+      assert Actions.post(:"Elixir.X/Y", "go") == ~S|@post("/ds/x%2F_y/go")|
+    end
+
+    test "rejects values that browser URL parsing would treat as missing or dot segments" do
+      for value <- ["", ".", ".."] do
+        assert_raise ArgumentError, ~r/path segment/, fn -> Actions.post(String, value) end
+
+        assert_raise ArgumentError, ~r/path segment/, fn ->
+          Actions.post("save", module: value)
+        end
       end
     end
   end

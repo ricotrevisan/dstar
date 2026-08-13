@@ -62,7 +62,8 @@ end
 Key rules:
 - One module per page — no separate controller, HTML module, or template file.
 - `event("name")` generates the `@post(...)` expression client-side; no path
-  threading needed for path params.
+  threading needed for path params. The name is encoded as one literal route
+  segment; empty, `.` and `..` names are rejected.
 - The library calls `Dstar.start/1` before `handle_event/3` — do not call it
   again inside the handler.
 - `dstar "/path", PageModule` is the allowlist. No separate allowlist entry needed.
@@ -118,10 +119,12 @@ All functions in `Dstar` module:
 
 ### HTTP Verb Helpers
 
-- **`Dstar.post(module, event_name)`** — Generates `@post("/ds/:module/:event", {...})` for attributes
-- **`Dstar.post(module, event_name, opts)`** — With options (`:prefix` for URL prefix)
-- **`Dstar.post(event_name, opts)`** — Dynamic module variant (reads `$_dstar_module` signal from client)
-- All HTTP verbs available: `Dstar.get/2,3`, `Dstar.put/2,3`, `Dstar.patch/2,3`, `Dstar.delete/2,3`
+- **`Dstar.post(module, event_name)`** — Generates `@post("/ds/:module/:event")` for attributes.
+- **`Dstar.post(module, event_name, opts)`** — `:prefix` is a local absolute app path beginning with one `/`; relative, protocol-relative, cross-origin, dot-segment, query, fragment, backslash, and control-containing, malformed-percent, and non-UTF-8 prefixes are rejected.
+- **`Dstar.post(event_name, opts)`** — Dynamic module variant. Without `:module`, it reads and percent-encodes `$_dstar_module` in the browser. `:module` is a literal module override, not JavaScript.
+- Event and module values are UTF-8 percent-encoded as one route segment. `/`, `\`, `?`, `#`, `%`, controls, quotes, and Unicode round-trip to the handler. Empty, `.` and `..` values raise `ArgumentError`.
+- Page/Component `event(..., opts: "...")` and page `connect(opts: "...")` treat `:opts` as raw **trusted developer code**. Never interpolate request or stored data into it.
+- All HTTP verbs available: `Dstar.get/2,3`, `Dstar.put/2,3`, `Dstar.patch/2,3`, `Dstar.delete/2,3`.
 
 ## CSRF Setup
 
@@ -163,7 +166,9 @@ defmodule MyApp.CounterHandler do
 end
 ```
 
-Client: `data-on:click={Dstar.post(CounterHandler, "increment")}`
+Client: `data-on:click={Dstar.post(CounterHandler, "increment")}`. The helper
+encodes both route values as literal path segments; do not concatenate a URL or
+a Datastar expression by hand when either value contains data.
 
 ## Real-time Streaming Pattern
 

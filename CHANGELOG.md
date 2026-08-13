@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Security
+
+- **Action builders no longer interpolate caller values into executable
+  Datastar/JavaScript or URL structure (#25).** Core Actions, Page, Component,
+  and stream-connect expressions now share one structured builder. Literal
+  event/module values are percent-encoded as one path segment and JavaScript
+  string chunks are JSON-serialized; the default dynamic module signal is
+  encoded under equivalent rules at runtime. Exact empty/`.`/`..` segments are
+  rejected because browser URL parsing normalizes them.
+- `prefix:` now accepts only local absolute application paths beginning with
+  one `/`; protocol-relative/cross-origin, dot-segment, backslash, query,
+  fragment, control-containing, malformed-percent, and non-UTF-8 values raise
+  `ArgumentError`. Component `data-ds-base` is checked against the same runtime
+  safety boundary, and page pathnames cannot become protocol-relative targets.
+- Page/Component event `:opts` and Page connect `:opts` remain raw JavaScript
+  for trusted developer-authored configuration only. They are not a data API
+  and must never contain request, stored, slug, or user values.
+
 ## 0.2.0 — 2026-08-05
 
 ### Changed

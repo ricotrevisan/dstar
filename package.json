@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "test:browser": "mix test --only browser"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
