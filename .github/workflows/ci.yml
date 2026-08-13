@@ -49,3 +49,25 @@ jobs:
 
       - name: Run tests
         run: mix test
+
+  browser:
+    runs-on: ubuntu-latest
+    name: Browser action URL regression
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: mix deps.get
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Evaluate emitted actions in Chromium
+        run: mix test --only browser test/browser/action_url_browser_test.exs

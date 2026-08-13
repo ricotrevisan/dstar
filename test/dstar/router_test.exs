@@ -17,6 +17,10 @@ defmodule Dstar.RouterTest do
     def handle_event(conn, "increment", signals) do
       patch_signals(conn, %{count: (signals["count"] || 0) + 1})
     end
+
+    def handle_event(conn, event, _signals) do
+      patch_signals(conn, %{event: event})
+    end
   end
 
   defmodule Drawer do
@@ -70,6 +74,17 @@ defmodule Dstar.RouterTest do
 
     assert conn.state == :chunked
     assert_patched_signals(conn, %{count: 2})
+  end
+
+  test "POST event route decodes an encoded slash, percent sign, and Unicode from one segment" do
+    conn =
+      conn(:post, "/counter/_event/a%2Fb%252f%E6%9D%B1%E4%BA%AC")
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Map.put(:body_params, %{})
+      |> call()
+
+    assert conn.state == :chunked
+    assert_patched_signals(conn, %{event: "a/b%2f東京"})
   end
 
   test "POST stream route 404s when page has no handle_connect" do

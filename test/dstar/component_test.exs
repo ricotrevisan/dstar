@@ -31,26 +31,37 @@ defmodule Dstar.ComponentTest do
     assert html =~ "document.body.dataset.dsBase"
     # default base lives in the JS fallback (HEEx-escaped quotes)
     assert html =~ "|| &#39;/ds&#39;"
-    assert html =~ "/#{encoded}/change_title:abc"
+    assert html =~ "/#{encoded}/change_title%3Aabc"
   end
 
   test "event/2 supports verb override" do
     encoded = Dstar.Actions.encode_module(DetailDrawer)
+    expression = DetailDrawer.event("remove", verb: :delete)
 
-    assert DetailDrawer.event("remove", verb: :delete) ==
-             "@delete((document.body.dataset.dsBase || '/ds').replace(/\\/+$/, '') + '/#{encoded}/remove')"
+    assert String.starts_with?(expression, "@delete(")
+    assert expression =~ ~s|+ "/#{encoded}/remove")|
   end
 
   test "event/2 passes a raw JS opts string through" do
     encoded = Dstar.Actions.encode_module(DetailDrawer)
+    expression = DetailDrawer.event("save", opts: "{retryMaxCount: 5}")
 
-    assert DetailDrawer.event("save", opts: "{retryMaxCount: 5}") ==
-             "@post((document.body.dataset.dsBase || '/ds').replace(/\\/+$/, '') + '/#{encoded}/save', {retryMaxCount: 5})"
+    assert String.starts_with?(expression, "@post(")
+    assert expression =~ ~s|+ "/#{encoded}/save", {retryMaxCount: 5})|
   end
 
-  test "event/2 raises on names containing a quote or slash" do
-    assert_raise ArgumentError, fn -> DetailDrawer.event("bad'name") end
-    assert_raise ArgumentError, fn -> DetailDrawer.event("bad/name") end
+  test "event/2 rejects missing and dot event segments" do
+    for value <- ["", ".", ".."] do
+      assert_raise ArgumentError, ~r/path segment/, fn -> DetailDrawer.event(value) end
+    end
+  end
+
+  test "event/2 encodes URL-significant names as one literal segment" do
+    encoded = Dstar.Actions.encode_module(DetailDrawer)
+    expression = DetailDrawer.event("bad'name/..\\?x#y%2f\r\n東京")
+
+    assert expression =~
+             ~s|+ "/#{encoded}/bad%27name%2F%2E%2E%5C%3Fx%23y%252f%0D%0A%E6%9D%B1%E4%BA%AC")|
   end
 
   test "handle_event works through Dstar.Plugs.Dispatch" do

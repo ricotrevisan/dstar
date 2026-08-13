@@ -49,7 +49,7 @@ defmodule Dstar.PageTest do
     assert html =~ "data-signals:count"
 
     assert html =~
-             "@post(location.pathname.replace(/\\/+$/, &#39;&#39;) + &#39;/_event/increment&#39;)"
+             "@post(location.pathname.replace(/^\\/+/, &#39;/&#39;).replace(/\\/+$/, &#39;&#39;) + &quot;/_event/increment&quot;)"
   end
 
   test "the assign shim works on conns inside mount" do

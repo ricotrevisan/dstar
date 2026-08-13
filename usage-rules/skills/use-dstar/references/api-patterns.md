@@ -227,6 +227,18 @@ end
 </div>
 ```
 
+Use the action helpers whenever an event or module value contains data. Core,
+Page, and Component actions percent-encode each value as one route segment;
+the handler receives the decoded original. Empty, `.` and `..` values are
+rejected because browser URL parsing normalizes them. `prefix:` and
+`data-ds-base` are trusted local absolute app paths beginning with one `/`, not
+external URLs or paths containing dot segments; percent escapes must be valid UTF-8. A dynamic helper encodes `$_dstar_module` at runtime, while
+`module:` is a literal override.
+
+Raw `event(..., opts: "...")` and `connect(opts: "...")` values are executable
+JavaScript for trusted developer configuration only. Never interpolate request,
+stored, or user data into `:opts`.
+
 ## CSRF Setup
 
 Phoenix expects the CSRF token in the `_csrf_token` body param — and Datastar can't deliver that: its `_`-prefixed signal keys are front-end-only and never sent to the backend. So the token travels as a non-prefixed signal, and one plug copies it into place.

@@ -13,7 +13,7 @@ Other libraries give you SSE primitives and leave the rest to you. Dstar gives y
 
 - **Pages** — `use Dstar.Page` puts render, event handlers, streaming callbacks, and components in one module. One router line wires it.
 - **Event dispatch** — One route, unlimited handlers. `Dstar.Plugs.Dispatch` routes events to handler modules by convention, so you never hand-wire a route per action.
-- **URL generation** — `Dstar.post/2`, `Dstar.get/2`, `Dstar.delete/2` generate `@post(...)` expressions with correct paths. No hand-written URLs in templates.
+- **Safe URL generation** — `Dstar.post/2`, `Dstar.get/2`, and the page/component helpers encode caller values as literal path segments and serialize JavaScript strings. No hand-written URLs or caller text in executable syntax.
 - **CSRF handling** — Phoenix wants `_csrf_token`, but Datastar keeps
   `_`-prefixed signals client-side. So the token travels as a non-prefixed
   signal, and `Dstar.Plugs.RenameCsrfParam` maps it back — one plug, one
@@ -190,7 +190,9 @@ Pages embed `<MyAppWeb.DetailDrawer.drawer item={@item} />` and need zero
 `handle_event` clauses for it. If your app mounts routes under a prefix,
 declare the dispatch base once in the root layout: `<body data-ds-base={...}>`
 (defaults to `/ds`; it must match the base given to `dstar_components/2`,
-including any app path prefix).
+including any app path prefix). `data-ds-base` is trusted configuration and
+must be a local absolute application path beginning with one `/`; the helper
+rejects protocol-relative values, dot segments, backslashes, queries, fragments, and controls.
 
 Unlike page handlers, component handlers call `start()` themselves — the dispatch plug doesn't start the SSE response for them.
 
@@ -216,7 +218,27 @@ Everything goes through the `Dstar` convenience module, which delegates to the l
 | `execute_script/2,3` | Run JavaScript on the client. |
 | `redirect/2,3` | Navigate the client to a URL. |
 | `console_log/2,3` | Log to the browser console. |
-| `post/1,2,3` `get/1,2,3` `put/1,2,3` `patch/1,2,3` `delete/1,2,3` | Build `@post(...)`-style action expressions for Datastar attributes. Arity 1 is the dynamic form (`Dstar.post("increment")`), which resolves the module client-side. |
+| `post/1,2,3` `get/1,2,3` `put/1,2,3` `patch/1,2,3` `delete/1,2,3` | Build `@post(...)`-style action expressions for Datastar attributes. Arity 1 is the dynamic form (`Dstar.post("increment")`), which resolves and encodes the module client-side. |
+
+### Safe action URL values
+
+Core, Page, and Component actions share one URL builder. Event names and
+literal module values are UTF-8 percent-encoded as **one route segment**, so
+`/`, `\`, `?`, `#`, `%`, quotes, controls, and Unicode arrive at the handler
+as data rather than executable syntax or URL structure. Empty, `.` and `..`
+segments raise `ArgumentError` because browsers normalize them. The default
+dynamic module signal is encoded under the same rules at runtime; `module:` is
+a literal module override, not JavaScript or a signal name.
+
+A core `prefix:` must be a local absolute application path beginning with one
+`/`. Relative, protocol-relative/cross-origin, dot-segment, backslash, query, fragment, and
+control-containing, malformed-percent, and non-UTF-8 prefixes raise `ArgumentError`.
+
+`event(..., opts: "...")` and `connect(opts: "...")` accept a raw JavaScript
+options object for developer-authored Datastar configuration. This is an
+explicit **trusted-code escape hatch**: never interpolate request parameters,
+stored values, slugs, or other data into `:opts`. Put data in event/module
+values or signals instead.
 
 ## Real-time Streaming
 

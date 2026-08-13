@@ -27,7 +27,11 @@ defmodule Dstar.Component do
   Unlike `Dstar.Page`, `event/2` here targets the component's dispatch
   URL: `<base>/<encoded-module>/<event>`. The base defaults to `/ds` and
   is read client-side from `<body data-ds-base="...">`, so it must match
-  the base you give `dstar_components/2`. Two common setups:
+  the base you give `dstar_components/2`. The value must be a trusted local
+  absolute application path beginning with one `/`; protocol-relative values,
+  dot segments, backslashes, queries, fragments, and controls are rejected in
+  the browser; percent escapes must decode successfully.
+  Two common setups:
 
       # Router: dstar_components "/ds", [...]   (the default — no layout
       # attribute needed)
@@ -81,8 +85,11 @@ defmodule Dstar.Component do
       import Dstar.Page.Helpers, only: [patch: 3, patch: 4]
 
       @doc """
-      Builds a Datastar action expression targeting this component's
-      dispatch URL: `(document.body.dataset.dsBase || '/ds') + '/<module>/<name>'`.
+      Builds a Datastar action expression targeting this component's dispatch URL.
+
+      Event and module values are percent-encoded as one route segment. The
+      optional `:opts` value is raw, trusted JavaScript for developer-authored
+      action options; never interpolate request or stored data into it.
       """
       def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
         Dstar.Component.build_event(__MODULE__, name, opts)
@@ -98,9 +105,9 @@ defmodule Dstar.Component do
     # The dispatch base comes from <body data-ds-base="...">, defaulting to
     # "/ds". It must match the base given to `dstar_components/2` — keeping
     # it client-side means one layout attribute covers app path prefixes too.
-    Dstar.Actions.build_expression(
-      name,
-      "(document.body.dataset.dsBase || '/ds').replace(/\\/+$/, '') + '/#{encoded}/#{name}'",
+    Dstar.Actions.build_action(
+      :component_base,
+      [encoded, name],
       opts
     )
   end

@@ -7,3 +7,4 @@ doc
 plans/
 graphify-out/
 erl_crash.dump
+node_modules/

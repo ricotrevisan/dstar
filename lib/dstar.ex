@@ -181,10 +181,17 @@ defmodule Dstar do
   ## Examples
 
       Dstar.post(MyAppWeb.CounterHandler, "increment")
-      # => "@post('/ds/my_app_web-counter_handler/increment')"
+      # => ~s|@post("/ds/my_app_web-counter_handler/increment")|
 
-      Dstar.post("increment")
-      # => "@post('/ds/' + $_dstar_module + '/increment')"
+      expression = Dstar.post("increment")
+      # The `$_dstar_module` signal is percent-encoded at runtime.
+      String.contains?(expression, "encodeURIComponent")
+      # => true
+
+  Event and module values are percent-encoded as one route segment. Exact empty
+  and dot segments are rejected. In the module form, `:prefix` must be a local
+  absolute application path beginning with one `/`; `:module` on the dynamic
+  form is a literal module override, not JavaScript or a signal name.
 
   """
   defdelegate post(module_or_name, name_or_opts \\ []), to: Dstar.Actions

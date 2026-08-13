@@ -12,29 +12,31 @@ defmodule Dstar.Page.Helpers do
   Builds a page-local Datastar action expression.
 
       event("increment")
-      #=> "@post(location.pathname.replace(/\\/+$/, '') + '/_event/increment')"
+      #=> ~S|@post(location.pathname.replace(/^\/+/, '/').replace(/\/+$/, '') + "/_event/increment")|
 
       event("remove", verb: :delete)
-      #=> "@delete(location.pathname.replace(/\\/+$/, '') + '/_event/remove')"
+      #=> ~S|@delete(location.pathname.replace(/^\/+/, '/').replace(/\/+$/, '') + "/_event/remove")|
 
   The URL is computed in the browser, so path params (workspace slugs,
-  ids) need no server-side threading. Event names become a single URL
-  path segment: they must not contain `/` or `'`.
+  ids) need no server-side threading. Event names are percent-encoded as one
+  URL path segment; handlers receive the original decoded value. Empty,
+  `"."`, and `".."` names raise `ArgumentError` because browsers normalize
+  those segments.
 
-  Trailing slashes in the path are stripped client-side so pages mounted
-  at "/" or visited with a trailing slash don't produce protocol-relative
-  ("//") or double-slash URLs.
+  Leading slashes are collapsed and trailing slashes are stripped client-side,
+  so even an unusual pathname cannot become a protocol-relative target.
 
   ## Options
 
   - `:verb` — `:get | :post | :put | :patch | :delete` (default `:post`)
-  - `:opts` — raw JS object string appended as the action's options,
-    e.g. `"{indicator: 'saving'}"`
+  - `:opts` — trusted, developer-authored JavaScript appended as the action's
+    options, e.g. `"{indicator: 'saving'}"`. This is a code escape hatch;
+    never build it from request, stored, or other untrusted data.
   """
   def event(name, opts \\ []) when is_binary(name) and is_list(opts) do
-    Dstar.Actions.build_expression(
-      name,
-      "location.pathname.replace(/\\/+$/, '') + '/_event/#{name}'",
+    Dstar.Actions.build_action(
+      :page_path,
+      ["_event", name],
       opts
     )
   end
@@ -44,18 +46,21 @@ defmodule Dstar.Page.Helpers do
   `data-on:online__window`.
 
       connect()
-      #=> "@post(location.pathname, {retryMaxCount: Infinity})"
+      #=> ~S|@post(location.pathname.replace(/^\/+/, '/'), {retryMaxCount: Infinity})|
 
       connect(include_search: true)
-      #=> "@post(location.pathname + location.search, {retryMaxCount: Infinity})"
+      #=> ~S|@post(location.pathname.replace(/^\/+/, '/') + location.search, {retryMaxCount: Infinity})|
 
   ## Options
 
-  - `:opts` — override the options object (default `"{retryMaxCount: Infinity}"`)
+  - `:opts` — override the options object (default `"{retryMaxCount: Infinity}"`).
+    This is trusted, developer-authored JavaScript; never interpolate data into it.
   - `:include_search` — append `location.search` so query params reach `handle_connect`
     (pages whose render depends on them, e.g. `?step=`).
 
-  Always emits `@post` — Dstar streams connect over POST.
+  Leading slashes in `location.pathname` are collapsed so the emitted request
+  cannot become protocol-relative. Always emits `@post` — Dstar streams connect
+  over POST.
 
   > #### retryMaxCount does not bound reconnect cycles {: .warning}
   >
@@ -81,14 +86,14 @@ defmodule Dstar.Page.Helpers do
   def connect(opts \\ []) when is_list(opts) do
     extra = Keyword.get(opts, :opts, "{retryMaxCount: Infinity}")
 
-    url =
+    base =
       if Keyword.get(opts, :include_search, false) do
-        "location.pathname + location.search"
+        :stream_path_with_search
       else
-        "location.pathname"
+        :stream_path
       end
 
-    "@post(#{url}, #{extra})"
+    Dstar.Actions.build_action(base, [], verb: :post, opts: extra)
   end
 
   @doc """

@@ -210,7 +210,10 @@ Automatic synchronization between form inputs and signals.
 
 ## 7. Event Handling
 
-Respond to DOM events.
+Respond to DOM events. Prefer Dstar's action helpers when route event/module
+values contain data: they serialize JavaScript literals and percent-encode each
+value as one URL segment. Empty, `.` and `..` segments are rejected because
+browsers normalize them.
 
 ```heex
 <!-- Click handler -->
@@ -689,6 +692,11 @@ Track request in-flight status.
 ## 20. Custom Headers & Options
 
 Configure SSE requests in `@post`/`@get`/`@put`/`@delete`.
+
+Raw option objects—including Page/Component `event(..., opts: "...")` and
+`connect(opts: "...")`—are executable JavaScript. They are a trusted-code
+escape hatch for developer-authored configuration, not a place for request,
+stored, slug, or user data. Keep data in signals or encoded action values.
 
 ### Persistent SSE Stream
 ```heex
