@@ -113,7 +113,13 @@ All functions in `Dstar` module:
 
 - **`Dstar.execute_script(conn, script, opts \\ [])`** — Executes JS on client
   - Opts: `:auto_remove`, `:attributes` (map of script tag attributes, e.g. `%{type: "module"}`)
-- **`Dstar.redirect(conn, url, opts \\ [])`** — Client-side redirect
+- **`Dstar.redirect(conn, url, opts \\ [])`** — Client-side redirect.
+  Default destination policy is same-origin path-absolute (`/path`, `?q`, `#frag`).
+  Rejects `javascript:`/`data:`/`vbscript:` (any case, including
+  whitespace/control-obfuscated forms), protocol-relative URLs, URLs with
+  userinfo, and off-origin `http`/`https`. Opt in with `external: true` or
+  `allow: ["host"]`. `Jason.encode!/1` prevents JS string breakout, not a
+  dangerous destination.
 - **`Dstar.console_log(conn, message, opts \\ [])`** — Browser console output
   - Opts: `:level` (`:log`/`:warn`/`:error`/`:info`/`:debug`)
 

@@ -20,6 +20,21 @@
   for trusted developer-authored configuration only. They are not a data API
   and must never contain request, stored, slug, or user values.
 
+- **`Dstar.Scripts.redirect/3` destination policy.** JSON-encoding the URL
+  prevented JavaScript string breakout but not a dangerous destination:
+  `javascript:` assigned to `window.location.href` is DOM XSS, and unrestricted
+  absolute / protocol-relative URLs are an open redirect. Destinations are now
+  validated against parsed URL components (not a prefix check) and rejected
+  with `ArgumentError` before any SSE patch is emitted.
+
+  Default: same-origin path-absolute URLs, plus query/fragment on the current
+  path (`/workspaces`, `?x=1`, `#frag`). Rejected: `javascript:`/`data:`/
+  `vbscript:` (including mixed-case and whitespace/control-obfuscated forms),
+  protocol-relative URLs (`//evil.example`), URLs with userinfo
+  (`https://trusted.example@evil.example/`), and off-origin `http`/`https`.
+  Off-origin `http`/`https` requires `external: true` or `allow: ["host"]`.
+  `execute_script/3` is unchanged (trusted-code API).
+
 ## 0.2.0 — 2026-08-05
 
 ### Changed

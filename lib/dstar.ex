@@ -244,9 +244,14 @@ defmodule Dstar do
   @doc """
   Redirects the client to the given URL via JavaScript.
 
+  Default destination policy is same-origin and path-absolute
+  (`/workspaces`, `?x=1`, `#frag`). Off-origin `http`/`https` requires
+  `external: true` or `allow: ["host"]`. See `Dstar.Scripts.redirect/3`.
+
   ## Example
 
       conn |> Dstar.redirect("/workspaces")
+      conn |> Dstar.redirect("https://ok.example/docs", external: true)
 
   """
   def redirect(conn, url, opts \\ []) do

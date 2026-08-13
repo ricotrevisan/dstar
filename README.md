@@ -216,7 +216,7 @@ Everything goes through the `Dstar` convenience module, which delegates to the l
 | `append_elements/3,4` | Append HTML as the last child of a container. |
 | `upsert_elements/2,3` | Morph the element whose id matches the HTML root. |
 | `execute_script/2,3` | Run JavaScript on the client. |
-| `redirect/2,3` | Navigate the client to a URL. |
+| `redirect/2,3` | Navigate the client. Same-origin path-absolute by default; off-origin `http`/`https` needs `external: true` or `allow:`. |
 | `console_log/2,3` | Log to the browser console. |
 | `post/1,2,3` `get/1,2,3` `put/1,2,3` `patch/1,2,3` `delete/1,2,3` | Build `@post(...)`-style action expressions for Datastar attributes. Arity 1 is the dynamic form (`Dstar.post("increment")`), which resolves and encodes the module client-side. |
 

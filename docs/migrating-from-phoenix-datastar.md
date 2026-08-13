@@ -488,7 +488,11 @@ Alternatively, pipe Datastar-only routes through a pipeline without `:protect_fr
 
 ## Step 7: Update Script Execution & Redirects
 
-The API is nearly identical, just swap `socket` for `conn`:
+The API is nearly identical, just swap `socket` for `conn`. `Dstar.redirect/2,3`
+only accepts same-origin path-absolute destinations by default (`/results`,
+`?x=1`, `#frag`); off-origin `http`/`https` needs `external: true` or
+`allow: ["host"]`. `javascript:`/`data:`/`vbscript:`, protocol-relative URLs,
+and URLs with userinfo raise `ArgumentError` before any SSE patch is emitted:
 
 ```elixir
 # Before
@@ -530,7 +534,7 @@ end
 | `patch_elements(socket, sel, fn)` | `Dstar.patch_elements(conn, html, selector: sel)` | Render HTML before calling |
 | `patch_elements(socket, sel, html)` | `Dstar.patch_elements(conn, html, selector: sel)` | |
 | `execute_script(socket, js)` | `Dstar.execute_script(conn, js)` | |
-| `redirect(socket, url)` | `Dstar.redirect(conn, url)` | |
+| `redirect(socket, url)` | `Dstar.redirect(conn, url)` | Same-origin path-absolute by default; off-origin `http`/`https` needs `external: true` or `allow: ["host"]` |
 | `console_log(socket, msg)` | `Dstar.console_log(conn, msg)` | |
 | `event("name")` | `Dstar.post(Module, "name")` or `@post('/path')` | All verbs available: `get`, `put`, `patch`, `delete` |
 | `navigate("/path")` | Standard `<a href>` | No soft nav in Dstar |
