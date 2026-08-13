@@ -466,6 +466,27 @@ defmodule Dstar.ScriptsTest do
       assert_rejected("/\\evil.example")
     end
 
+    # WHATWG strips ASCII tab/LF/CR anywhere before parsing, so these
+    # become `//evil.example` in the browser. Scheme-only checks on the
+    # stripped form are not enough — the stripped parse must also fail
+    # the protocol-relative / host check.
+    test "rejects tab/LF/CR smuggled into a path-absolute URL that browsers treat as protocol-relative" do
+      assert_rejected("/\n/evil.example")
+      assert_rejected("/\t/evil.example")
+      assert_rejected("/\r/evil.example")
+      assert_rejected("/\n//evil.example")
+    end
+
+    test "a newline inside a local path that does not become protocol-relative is still allowed" do
+      # "/\nevil" strips to "/evil" — same-origin path, not "//evil".
+      assert_redirects("/path\nwith\nnewlines")
+    end
+
+    test "tab/LF/CR smuggling still cannot sneak past external: true" do
+      assert_rejected("/\n/evil.example", external: true)
+      assert_rejected("/\t/evil.example", allow: ["evil.example"])
+    end
+
     test "rejects non-http(s) schemes" do
       assert_rejected("ftp://files.example/x")
       assert_rejected("file:///etc/passwd")
