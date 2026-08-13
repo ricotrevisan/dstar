@@ -344,47 +344,215 @@ defmodule Dstar.ScriptsTest do
   end
 
   describe "redirect/3" do
-    test "redirects to a basic URL" do
-      conn = chunked_conn()
-      result = Scripts.redirect(conn, "/workspaces")
+    test "redirects to a path-absolute local URL" do
+      output = assert_redirects("/workspaces")
 
-      assert result.state == :chunked
+      assert output =~ "setTimeout(function(){window.location.href="
     end
 
-    test "redirects to an absolute URL" do
-      conn = chunked_conn()
-      result = Scripts.redirect(conn, "https://example.com/path")
-
-      assert result.state == :chunked
+    test "allows query and fragment on a local path" do
+      assert_redirects("/search?q=1#results")
     end
 
-    test "escapes single quotes in URL" do
-      conn = chunked_conn()
-      result = Scripts.redirect(conn, "/path?name=O'Reilly")
-
-      assert result.state == :chunked
+    test "allows a query-only reference on the current path" do
+      assert_redirects("?x=1")
     end
 
-    test "escapes backslashes in URL" do
-      conn = chunked_conn()
-      result = Scripts.redirect(conn, "/path\\with\\backslashes")
-
-      assert result.state == :chunked
+    test "allows a fragment-only reference on the current path" do
+      assert_redirects("#section")
     end
 
-    test "escapes newlines in URL" do
-      conn = chunked_conn()
-      result = Scripts.redirect(conn, "/path\nwith\nnewlines")
-
-      assert result.state == :chunked
+    test "allows query plus fragment without a path" do
+      assert_redirects("?x=1#frag")
     end
 
-    test "passes options through to execute/3" do
-      conn = chunked_conn()
-      result = Scripts.redirect(conn, "/path", event_id: "redirect-1")
-
-      assert result.state == :chunked
+    test "allows a same-origin absolute URL" do
+      assert_redirects("http://www.example.com/path")
     end
+
+    test "allows a same-origin URL with an explicit default port" do
+      assert_redirects("http://www.example.com:80/path")
+    end
+
+    test "allows backslashes in the middle of a local path" do
+      assert_redirects("/path\\with\\backslashes")
+    end
+
+    test "JSON-encodes quotes, backslashes, and CR/LF in the emitted JS" do
+      url = "/path?name=O'Reilly\\ok"
+      output = assert_redirects(url)
+
+      # JSON double-quotes the value, so `'` is fine raw; a lone backslash
+      # or line break must not appear unescaped inside the assignment.
+      refute output =~ "href='/path"
+      assert output =~ ~S|O'Reilly\\ok|
+      refute output =~ "/path\n"
+      refute output =~ "/path\r"
+    end
+
+    test "JSON-encodes CR/LF in a local path so they cannot break the JS string" do
+      assert_redirects("/path\nwith\nnewlines\r")
+    end
+
+    test "escapes U+2028 and U+2029 in the emitted JS string" do
+      url = "/path" <> <<0x2028::utf8, 0x2029::utf8>> <> "more"
+      output = assert_redirects(url)
+
+      refute String.contains?(output, <<0x2028::utf8>>)
+      refute String.contains?(output, <<0x2029::utf8>>)
+      assert output =~ "\\u2028"
+      assert output =~ "\\u2029"
+    end
+
+    test "passes execute/3 options through" do
+      result = Scripts.redirect(chunked_conn(), "/path", event_id: "redirect-1")
+
+      assert chunks(result) =~ "id: redirect-1"
+    end
+
+    test "rejects javascript: destinations" do
+      assert_rejected("javascript:alert(document.domain)")
+    end
+
+    test "rejects mixed-case JavaScript: destinations" do
+      assert_rejected("JavaScript:alert(1)")
+    end
+
+    test "rejects data: and vbscript: destinations" do
+      assert_rejected("data:text/html,x")
+      assert_rejected("DATA:text/html,x")
+      assert_rejected("vbscript:msgbox(1)")
+    end
+
+    test "rejects schemes hidden behind leading whitespace" do
+      assert_rejected("  javascript:alert(1)")
+      assert_rejected("  DATA:text/html,x")
+    end
+
+    test "rejects schemes hidden behind control and Unicode whitespace" do
+      assert_rejected("\tjavascript:alert(1)")
+      assert_rejected("java\tscript:alert(1)")
+      assert_rejected("javascript\t:alert(1)")
+      assert_rejected(<<0x00A0::utf8, "javascript:alert(1)">>)
+      assert_rejected(<<0x2028::utf8, "javascript:alert(1)">>)
+      assert_rejected(<<0xFEFF::utf8, "javascript:alert(1)">>)
+    end
+
+    test "rejects protocol-relative URLs" do
+      assert_rejected("//evil.example")
+      assert_rejected("//evil.example/phish")
+    end
+
+    test "rejects misleading userinfo/host forms" do
+      assert_rejected("https://trusted.example@evil.example/")
+      assert_rejected("https://trusted.example@evil.example/", external: true)
+      assert_rejected("https://trusted.example@evil.example/", allow: ["trusted.example"])
+    end
+
+    test "rejects ordinary external HTTPS by default" do
+      assert_rejected("https://evil.example")
+      assert_rejected("https://example.com/path")
+    end
+
+    test "rejects a different scheme on the request host" do
+      assert_rejected("https://www.example.com/path")
+    end
+
+    test "rejects a different port on the request host" do
+      assert_rejected("http://www.example.com:4000/path")
+    end
+
+    test "rejects a slash-backslash path that browsers may treat as protocol-relative" do
+      assert_rejected("/\\evil.example")
+    end
+
+    test "rejects non-http(s) schemes" do
+      assert_rejected("ftp://files.example/x")
+      assert_rejected("file:///etc/passwd")
+    end
+
+    test "rejects relative paths that are not path-absolute" do
+      assert_rejected("workspaces")
+      assert_rejected("./foo")
+    end
+
+    test "allows off-origin http(s) with external: true" do
+      assert_redirects("https://ok.example/docs", external: true)
+      assert_redirects("http://ok.example/docs", external: true)
+    end
+
+    test "allows an allowlisted host and rejects a non-matching host" do
+      assert_redirects("https://ok.example/docs", allow: ["ok.example"])
+      assert_rejected("https://evil.example/docs", allow: ["ok.example"])
+    end
+
+    test "allow matches the parsed host exactly, not as a suffix" do
+      assert_rejected("https://evil.ok.example/docs", allow: ["ok.example"])
+    end
+
+    test "allow is case-insensitive against the parsed host" do
+      assert_redirects("HTTPS://OK.EXAMPLE/docs", allow: ["ok.example"])
+    end
+
+    test "external: true still rejects dangerous schemes and protocol-relative URLs" do
+      assert_rejected("javascript:alert(1)", external: true)
+      assert_rejected("//evil.example", external: true)
+    end
+
+    test "rejected destinations emit no SSE patch" do
+      conn = chunked_conn()
+      before = chunks(conn)
+
+      assert_raise ArgumentError, ~r/unsafe redirect destination/, fn ->
+        Scripts.redirect(conn, "javascript:alert(document.domain)")
+      end
+
+      assert chunks(conn) == before
+      refute before =~ "datastar-patch-elements"
+      refute chunks(conn) =~ "window.location"
+    end
+
+    test "raises a clear error before emitting when the destination is rejected" do
+      conn = chunked_conn()
+
+      exception =
+        assert_raise ArgumentError, fn ->
+          Scripts.redirect(conn, "https://evil.example")
+        end
+
+      assert exception.message =~ "unsafe redirect destination"
+      assert exception.message =~ "external: true"
+      refute chunks(conn) =~ "datastar-patch-elements"
+    end
+  end
+
+  defp assert_redirects(url, opts \\ []) do
+    result = Scripts.redirect(chunked_conn(), url, opts)
+    output = chunks(result)
+    encoded = encode_redirect_url(url)
+
+    assert result.state == :chunked
+    assert output =~ "window.location.href=#{encoded}"
+    output
+  end
+
+  defp assert_rejected(url, opts \\ []) do
+    conn = chunked_conn()
+    before = chunks(conn)
+
+    assert_raise ArgumentError, ~r/unsafe redirect destination/, fn ->
+      Scripts.redirect(conn, url, opts)
+    end
+
+    assert chunks(conn) == before
+    refute chunks(conn) =~ "datastar-patch-elements"
+  end
+
+  defp encode_redirect_url(url) do
+    url
+    |> Jason.encode!()
+    |> String.replace(<<0x2028::utf8>>, "\\u2028")
+    |> String.replace(<<0x2029::utf8>>, "\\u2029")
   end
 
   describe "console_log/3" do

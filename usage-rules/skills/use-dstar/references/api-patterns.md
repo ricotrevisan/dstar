@@ -452,6 +452,7 @@ defmodule MyAppWeb.AuthController do
       "user.profile.theme",
       "user.preferences"
     ])
+    # same-origin path-absolute; off-origin http(s) needs external: true or allow:
     |> Dstar.redirect("/login")
   end
   

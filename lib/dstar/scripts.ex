@@ -70,21 +70,64 @@ defmodule Dstar.Scripts do
   @doc """
   Redirects the client to the given URL via JavaScript.
 
-  Uses `Jason.encode!/1` to safely encode the URL, preventing injection
-  attacks. Uses `setTimeout` for proper browser history handling.
+  Uses `setTimeout` so the browser records a history entry.
 
-  ## Examples
+  ## Destination policy
+
+  Default: same-origin, path-absolute destinations only. Query-only and
+  fragment-only references (`?x=1`, `#frag`) are also allowed — they stay
+  on the current path. Validation uses parsed URL *components* (via `URI`),
+  not a case-sensitive prefix check, and raises `ArgumentError` **before**
+  any SSE patch is emitted.
+
+  Allowed without opt-in:
 
       conn |> redirect("/workspaces")
-      conn |> redirect("https://example.com")
+      conn |> redirect("/search?q=1#results")
+      conn |> redirect("?next=1")
+      conn |> redirect("#section")
+      # same-origin absolute URL (scheme/host/port match the request)
+      conn |> redirect("http://www.example.com/path")
+
+  Rejected:
+
+    * `javascript:`, `data:`, `vbscript:` (any case)
+    * those schemes hidden behind leading, control, or Unicode whitespace
+      (`"  DATA:…"`, `"JavaScript:…"`, `"java\\tscript:…"`)
+    * protocol-relative URLs (`//evil.example`)
+    * URLs with userinfo (`https://trusted.example@evil.example/`)
+    * off-origin `http`/`https` (including `https://example.com`)
+
+  Off-origin `http`/`https` needs an explicit opt-in — either
+  `external: true` or a host allowlist. Hosts are matched exactly
+  (case-insensitive) against the *parsed* host. Dangerous schemes,
+  protocol-relative URLs, and userinfo are still rejected.
+
+      conn |> redirect("https://ok.example/docs", external: true)
+      conn |> redirect("https://ok.example/docs", allow: ["ok.example"])
+
+  `Jason.encode!/1` (plus the `</script` neutralizer in `execute/3`)
+  prevents the URL from breaking out of the generated JavaScript string.
+  It does **not** make the destination itself safe — do not pass an
+  untrusted `return_to` (or similar) without deciding the policy. For
+  raw JavaScript, use `execute/3`; that remains a trusted-code API.
+
+  ## Options
+
+    * `:external` - when `true`, allow any `http`/`https` URL
+    * `:allow` - list of host strings permitted for `http`/`https`
+    * plus all options from `execute/3`
 
   """
   @spec redirect(Plug.Conn.t(), String.t(), keyword()) :: Plug.Conn.t()
   def redirect(conn, url, opts \\ []) when is_binary(url) do
+    {policy_opts, exec_opts} = Keyword.split(opts, [:external, :allow])
+    validate_destination!(conn, url, policy_opts)
+
     execute(
       conn,
-      "setTimeout(function(){window.location.href=#{Jason.encode!(url)}},0)",
-      opts
+      "setTimeout(function(){window.location.href=#{encode_redirect_url(url)}},0)",
+      exec_opts
     )
   end
 
@@ -187,5 +230,213 @@ defmodule Dstar.Scripts do
     |> String.replace("'", "\\'")
     |> String.replace("\n", "\\n")
     |> String.replace("\r", "\\r")
+  end
+
+  # Destination policy for redirect/3.
+  #
+  # Jason.encode!/1 quotes the URL as JS data (no string breakout) but does
+  # not make the destination safe: `javascript:` assigned to
+  # `window.location.href` is DOM XSS, and an off-origin URL is an open
+  # redirect. We classify parsed URI components — never a prefix check —
+  # and raise before execute/3 runs so a rejected URL emits no SSE patch.
+  @dangerous_schemes ~w(javascript data vbscript)
+  @http_schemes ~w(http https)
+
+  # Unicode space / format characters that URI.parse leaves in the path
+  # (so `"\\u00A0javascript:alert(1)"` looks schemeless) but browsers may
+  # ignore, revealing a dangerous scheme. ASCII C0 + space are handled
+  # by the `c <= 0x20` guard.
+  @unicode_ignorables [
+    0x00A0,
+    0x00AD,
+    0x1680,
+    0x180E,
+    0x2000,
+    0x2001,
+    0x2002,
+    0x2003,
+    0x2004,
+    0x2005,
+    0x2006,
+    0x2007,
+    0x2008,
+    0x2009,
+    0x200A,
+    0x200B,
+    0x200C,
+    0x200D,
+    0x2028,
+    0x2029,
+    0x202F,
+    0x205F,
+    0x2060,
+    0x3000,
+    0xFEFF
+  ]
+
+  defp validate_destination!(conn, url, opts) do
+    allow = fetch_allow!(opts)
+    external? = Keyword.get(opts, :external, false) == true
+
+    codepoints = utf8_codepoints!(url)
+
+    if url == "" or (codepoints != [] and ignorable_char?(hd(codepoints))) do
+      raise_unsafe_redirect(url)
+    end
+
+    # Browsers strip tabs/newlines (and similar) before parsing, so
+    # `java\tscript:alert(1)` becomes `javascript:alert(1)`. Classify the
+    # stripped form as well as the raw parse.
+    stripped = codepoints |> Enum.reject(&ignorable_char?/1) |> List.to_string()
+    reject_if_bad_scheme!(URI.parse(stripped), url)
+
+    uri = URI.parse(url)
+    reject_if_bad_scheme!(uri, url)
+
+    cond do
+      not is_nil(uri.userinfo) ->
+        raise_unsafe_redirect(url)
+
+      protocol_relative?(uri) ->
+        raise_unsafe_redirect(url)
+
+      local_destination?(conn, uri) ->
+        :ok
+
+      http_destination?(uri) and (external? or host_allowed?(uri, allow)) ->
+        :ok
+
+      true ->
+        raise_unsafe_redirect(url)
+    end
+  end
+
+  defp reject_if_bad_scheme!(%URI{} = uri, url) do
+    scheme = normalized_scheme(uri)
+
+    cond do
+      scheme in @dangerous_schemes ->
+        raise_unsafe_redirect(url)
+
+      scheme not in [nil | @http_schemes] ->
+        raise_unsafe_redirect(url)
+
+      true ->
+        :ok
+    end
+  end
+
+  defp normalized_scheme(%URI{scheme: nil}), do: nil
+  defp normalized_scheme(%URI{scheme: scheme}), do: String.downcase(scheme)
+
+  defp protocol_relative?(%URI{scheme: scheme, host: host}) do
+    is_nil(scheme) and not is_nil(host)
+  end
+
+  defp http_destination?(%URI{} = uri) do
+    normalized_scheme(uri) in @http_schemes and is_binary(uri.host) and uri.host != ""
+  end
+
+  defp local_destination?(conn, uri) do
+    cond do
+      http_destination?(uri) ->
+        same_origin?(conn, uri)
+
+      not is_nil(uri.scheme) or not is_nil(uri.host) ->
+        false
+
+      path_absolute_local?(uri.path) ->
+        true
+
+      query_or_fragment_only?(uri) ->
+        true
+
+      true ->
+        false
+    end
+  end
+
+  # Path-absolute and not protocol-relative. `/\evil` is rejected because
+  # some browsers treat `\` as `/`, turning it into `//evil`.
+  defp path_absolute_local?(<<"//", _::binary>>), do: false
+  defp path_absolute_local?(<<"/\\", _::binary>>), do: false
+  defp path_absolute_local?(<<"/", _::binary>>), do: true
+  defp path_absolute_local?(_), do: false
+
+  defp query_or_fragment_only?(%URI{path: path, query: query, fragment: fragment}) do
+    (is_nil(path) or path == "") and (not is_nil(query) or not is_nil(fragment))
+  end
+
+  defp same_origin?(conn, uri) do
+    req_scheme = conn.scheme |> to_string() |> String.downcase()
+    req_host = conn.host |> to_string() |> String.downcase()
+    req_port = effective_port(req_scheme, conn.port)
+
+    dest_scheme = normalized_scheme(uri)
+    dest_host = uri.host |> to_string() |> String.downcase()
+    dest_port = effective_port(dest_scheme, uri.port)
+
+    dest_scheme == req_scheme and dest_host == req_host and dest_port == req_port
+  end
+
+  defp effective_port("http", port) when port in [nil, 80], do: 80
+  defp effective_port("https", port) when port in [nil, 443], do: 443
+  defp effective_port(_scheme, port), do: port
+
+  defp host_allowed?(%URI{host: host}, allow) when is_binary(host) and host != "" do
+    dest = String.downcase(host)
+    Enum.any?(allow, fn allowed -> String.downcase(allowed) == dest end)
+  end
+
+  defp host_allowed?(_, _), do: false
+
+  defp fetch_allow!(opts) do
+    case Keyword.get(opts, :allow, []) do
+      list when is_list(list) ->
+        Enum.each(list, fn
+          host when is_binary(host) and host != "" ->
+            :ok
+
+          other ->
+            raise ArgumentError,
+                  "redirect/3 :allow must be a list of host strings, got: #{inspect(other)}"
+        end)
+
+        list
+
+      other ->
+        raise ArgumentError,
+              "redirect/3 :allow must be a list of host strings, got: #{inspect(other)}"
+    end
+  end
+
+  defp utf8_codepoints!(url) do
+    case :unicode.characters_to_list(url) do
+      list when is_list(list) -> list
+      _ -> raise_unsafe_redirect(url)
+    end
+  end
+
+  defp ignorable_char?(c) when is_integer(c) and c <= 0x20, do: true
+  defp ignorable_char?(0x7F), do: true
+  defp ignorable_char?(c) when c in @unicode_ignorables, do: true
+  defp ignorable_char?(_), do: false
+
+  # Jason.encode!/1 is valid JSON but leaves U+2028/U+2029 unescaped.
+  # Older JS string grammars treat those as line terminators, so a URL
+  # carrying them would break out of `window.location.href="…"`.
+  defp encode_redirect_url(url) do
+    url
+    |> Jason.encode!()
+    |> String.replace(<<0x2028::utf8>>, "\\u2028")
+    |> String.replace(<<0x2029::utf8>>, "\\u2029")
+  end
+
+  defp raise_unsafe_redirect(url) do
+    raise ArgumentError,
+          "unsafe redirect destination: #{inspect(url)}. " <>
+            "Default policy allows same-origin path-absolute URLs " <>
+            "(and query/fragment on the current path). " <>
+            "Use external: true or allow: [\"host\"] for http(s) URLs."
   end
 end

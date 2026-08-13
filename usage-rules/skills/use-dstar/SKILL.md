@@ -45,7 +45,7 @@ end
 ### Scripts & Navigation
 
 - `Dstar.execute_script(conn, "console.log('hi')", auto_remove: true)`
-- `Dstar.redirect(conn, "/path")`
+- `Dstar.redirect(conn, "/path")` — same-origin path-absolute by default (`/path`, `?q`, `#frag`). Off-origin `http`/`https` needs `external: true` or `allow: ["host"]`. Rejects `javascript:`/`data:`/`vbscript:`, protocol-relative URLs, and userinfo. `Jason.encode!/1` prevents JS string breakout, not a dangerous destination.
 - `Dstar.console_log(conn, "Debug info", level: :warn)` — Levels: `:log`, `:warn`, `:error`, `:info`, `:debug`
 
 ### HTTP Verb Helpers
