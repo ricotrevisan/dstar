@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`Dstar.Test.assert_patched_signals/2` no longer passes when a signal is
+  absent.** Comparison now uses `Map.fetch/2`, so expecting `nil` fails when
+  the signal was never patched and passes only when the emitted JSON
+  explicitly contains the key with null (as `remove_signals/2` produces).
+  Failure messages distinguish "signal was not patched" from "signal had the
+  wrong value" and include the full patched signal map. Atom/string key
+  normalization remains top-level-only; nested JSON object keys must be
+  strings.
+
 ### Security
 
 - **Action builders no longer interpolate caller values into executable
