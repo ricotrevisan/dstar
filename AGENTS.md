@@ -43,11 +43,16 @@ Transport depends on the HTTP method:
   request body"** — on GET/DELETE it is in the query string.
 
 `Dstar.Plugs.RenameCsrfParam` extracts the token from either channel into
-`body_params["_csrf_token"]` for `Plug.CSRFProtection`. Validation is
-cryptographic against the session-derived token, so renaming an
-attacker-chosen value is not a bypass — but the URL placement on GET/DELETE
-means the token lands in access logs and same-origin `Referer` headers; the
-README's CSRF section documents the hardening options.
+`body_params["_csrf_token"]` for `Plug.CSRFProtection`. It decides whether
+that key is already present by inspecting `body_params`, not merged
+`params` — a query `_csrf_token` must not suppress a valid body or
+`datastar` source. Validation is cryptographic against the session-derived
+token, so renaming an attacker-chosen value is not a bypass — but the URL
+placement on GET/DELETE means the token lands in access logs and
+same-origin `Referer` headers; the README's CSRF section documents the
+hardening options (`no-referrer`/`origin`, redact the whole `datastar`
+query value, or `x-csrf-token`). Session/auth checks are not a CSRF
+substitute.
 
 ## Docs must stay in sync
 

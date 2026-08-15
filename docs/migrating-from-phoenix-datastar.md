@@ -482,9 +482,13 @@ Expose the token as a **non-prefixed** signal in your root layout:
 <body data-signals:csrf={"'#{get_csrf_token()}'"}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed. (On GET/DELETE the token rides in the URL, so it lands in access logs and same-origin `Referer` headers; validation is unaffected, but scrub query strings from logs and set a `Referrer-Policy` if that exposure matters.)
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed.
 
-Alternatively, pipe Datastar-only routes through a pipeline without `:protect_from_forgery` — simpler, but those endpoints then rely on your session/auth checks alone.
+The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`.
+
+Cookie-authenticated state-changing routes need a real CSRF defense — normally this plug plus `:protect_from_forgery`, or an `x-csrf-token` header (strongest hygiene: the token never lands in a URL), or a deliberately implemented Origin / Fetch-Metadata policy. Session/auth checks and SameSite cookies identify the victim; they do not prove who initiated the request.
+
+On GET/DELETE the token rides in the URL, so it lands in access logs and same-origin `Referer` headers. Validation is unaffected, but redact the entire `datastar` query value from logs/APM and set `Referrer-Policy` to `no-referrer` or `origin` (`same-origin` still sends path/query on same-origin requests).
 
 ## Step 7: Update Script Execution & Redirects
 

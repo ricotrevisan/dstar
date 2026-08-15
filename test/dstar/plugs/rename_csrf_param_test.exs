@@ -295,6 +295,133 @@ defmodule Dstar.Plugs.RenameCsrfParamTest do
     end
   end
 
+  describe "token source precedence with split query/body maps" do
+    setup do
+      opts = RenameCsrfParam.init([])
+      %{opts: opts}
+    end
+
+    test "a query _csrf_token does not suppress a body source token", %{opts: opts} do
+      conn =
+        split_conn(:post, "/test", %{"_csrf_token" => "query-junk"}, %{"csrf" => "body-token"})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "body-token"
+    end
+
+    test "a query _csrf_token does not suppress a datastar source token", %{opts: opts} do
+      conn =
+        split_conn(
+          :delete,
+          "/test",
+          %{"_csrf_token" => "query-junk", "datastar" => ~s({"csrf":"ds-token"})},
+          %{}
+        )
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "ds-token"
+    end
+
+    test "a query _csrf_token is not copied into body_params", %{opts: opts} do
+      conn = split_conn(:post, "/test", %{"_csrf_token" => "query-only"}, %{"other" => "value"})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      refute Map.has_key?(result.body_params, "_csrf_token")
+    end
+
+    test "existing body _csrf_token is not overwritten by a body source token", %{opts: opts} do
+      conn =
+        split_conn(:post, "/test", %{}, %{
+          "_csrf_token" => "form-token",
+          "csrf" => "signal-token"
+        })
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "form-token"
+    end
+
+    test "existing body _csrf_token is not overwritten by a datastar token", %{opts: opts} do
+      conn =
+        split_conn(
+          :post,
+          "/test",
+          %{"datastar" => ~s({"csrf":"ds-token"})},
+          %{"_csrf_token" => "form-token"}
+        )
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "form-token"
+    end
+
+    test "body source token wins over a conflicting datastar token", %{opts: opts} do
+      conn =
+        split_conn(
+          :post,
+          "/test",
+          %{"datastar" => ~s({"csrf":"ds-token"})},
+          %{"csrf" => "body-token"}
+        )
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "body-token"
+    end
+
+    test "datastar token wins over a query-only source param", %{opts: opts} do
+      conn =
+        split_conn(
+          :get,
+          "/test",
+          %{"csrf" => "query-csrf", "datastar" => ~s({"csrf":"ds-token"})},
+          %{}
+        )
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "ds-token"
+    end
+
+    test "copies a query-only source param when no body or datastar token is present", %{
+      opts: opts
+    } do
+      conn = split_conn(:get, "/test", %{"csrf" => "query-csrf"}, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "query-csrf"
+    end
+
+    test "does not copy x-csrf-token into body_params", %{opts: opts} do
+      conn =
+        split_conn(:post, "/test", %{}, %{"other" => "value"})
+        |> Plug.Conn.put_req_header("x-csrf-token", "header-token")
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      refute Map.has_key?(result.body_params, "_csrf_token")
+      assert Plug.Conn.get_req_header(result, "x-csrf-token") == ["header-token"]
+    end
+
+    test "still copies a body source token when an x-csrf-token header is also present", %{
+      opts: opts
+    } do
+      conn =
+        split_conn(:post, "/test", %{}, %{"csrf" => "body-token"})
+        |> Plug.Conn.put_req_header("x-csrf-token", "header-token")
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      # Plug.CSRFProtection checks body_params["_csrf_token"] before the header.
+      assert result.body_params["_csrf_token"] == "body-token"
+      assert Plug.Conn.get_req_header(result, "x-csrf-token") == ["header-token"]
+    end
+  end
+
   describe "integration scenarios" do
     test "typical Phoenix form submission flow" do
       # Init plug with default settings
@@ -343,5 +470,14 @@ defmodule Dstar.Plugs.RenameCsrfParamTest do
       assert result == conn
       assert result.body_params["_csrf_token"] == "existing-token"
     end
+  end
+
+  # Plug merges query then body (body wins on key conflict). Tests that
+  # reproduce the query-vs-body suppression bug must keep the maps split.
+  defp split_conn(method, path, query_params, body_params) do
+    conn(method, path)
+    |> Map.put(:query_params, query_params)
+    |> Map.put(:body_params, body_params)
+    |> Map.put(:params, Map.merge(query_params, body_params))
   end
 end

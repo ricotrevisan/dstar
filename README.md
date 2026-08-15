@@ -599,6 +599,33 @@ channel, where `Plug.CSRFProtection` looks. This one setup covers page
 helpers — including `Dstar.delete/2,3`, which `:protect_from_forgery` does
 check.
 
+When more than one token is present, `RenameCsrfParam` only writes
+`body_params["_csrf_token"]` if that key is missing, in this order:
+existing body `_csrf_token`, the body `csrf` signal, `csrf` inside the
+`datastar` query param, then a last-resort top-level `csrf` param. A
+query-string `_csrf_token` is not a source and does not hide a valid body
+or `datastar` token. `Plug.CSRFProtection` then checks the body token
+first, then the `x-csrf-token` header.
+
+#### CSRF is not optional for cookie-authenticated mutations
+
+Session and auth checks identify the victim; they do not prove who
+initiated the request. A hostile same-site origin — or a cross-site origin
+under permissive cookie settings — can POST to a predictable event or
+dispatch route without reading the SSE response. SameSite cookies and
+login checks are defense-in-depth, not CSRF validation.
+
+Cookie-authenticated state-changing Datastar routes need a real CSRF
+defense:
+
+- **Default:** `Dstar.Plugs.RenameCsrfParam` then `:protect_from_forgery`.
+- **Strongest hygiene:** send `x-csrf-token` from a custom Datastar action.
+  `Plug.CSRFProtection` accepts that header directly, and the token never
+  lands in a URL.
+- **Alternative:** a deliberately implemented Origin / Fetch-Metadata
+  policy of comparable strength. Skipping `:protect_from_forgery` without
+  one of these is not a supported setup.
+
 #### A note on GET/DELETE and the token in URLs
 
 The token riding on every request is the point of this setup, but on
@@ -608,19 +635,12 @@ string**, which flows into server/proxy access logs and same-origin
 compares the token cryptographically against the session-derived value —
 but if that exposure matters to you:
 
-- Scrub query strings (or at least the `datastar` param) from access/proxy
-  logs.
-- Set an explicit `Referrer-Policy` header (e.g. `same-origin` or
-  `no-referrer`).
-- For maximum hygiene, transport the token as an `x-csrf-token` header via
-  a small custom Datastar action — `Plug.CSRFProtection` accepts that
-  header directly, and it never touches a URL.
-
-### Or: skip CSRF for SSE-only routes
-
-Pipe Datastar-only routes through a pipeline without `:protect_from_forgery`
-(the classic dispatch-route setup). Simpler, but then those endpoints rely on
-your session/auth checks alone.
+- Redact the entire `datastar` query value from access/proxy logs and APM
+  (the token is nested JSON, not a `_csrf_token` field).
+- Set `Referrer-Policy` to `no-referrer` or `origin`. `same-origin` still
+  sends the full URL — including the query — on same-origin requests.
+- Prefer `x-csrf-token` header transport when you want the token out of
+  URLs entirely.
 
 ## Lower-level Modules
 

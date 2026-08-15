@@ -4,6 +4,20 @@
 
 ### Security
 
+- **CSRF guidance is fail-safe, and `RenameCsrfParam` no longer lets a
+  query `_csrf_token` hide a valid source token (#27).** The plug decides
+  whether `_csrf_token` is already present by inspecting `body_params` —
+  the map `Plug.CSRFProtection` reads — not merged `params`. Precedence
+  when writing: existing body `_csrf_token`, body `csrf` signal, `csrf`
+  inside the `datastar` query param, then a last-resort top-level `csrf`
+  param. The `x-csrf-token` header is left to Plug (body token first, then
+  header). Docs no longer treat session/auth checks as a CSRF substitute;
+  SameSite and login are defense-in-depth. GET/DELETE leakage advice now
+  redacts the entire `datastar` query value and recommends
+  `Referrer-Policy: no-referrer` or `origin` (`same-origin` still sends
+  path/query on same-origin requests). Header transport is the strongest
+  hygiene option.
+
 - **Action builders no longer interpolate caller values into executable
   Datastar/JavaScript or URL structure (#25).** Core Actions, Page, Component,
   and stream-connect expressions now share one structured builder. Literal
