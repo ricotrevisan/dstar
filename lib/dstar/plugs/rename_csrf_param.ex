@@ -30,6 +30,24 @@ defmodule Dstar.Plugs.RenameCsrfParam do
   The plug checks both channels, so one setup covers page `event()` POSTs,
   stream `connect()` POSTs, component events, and all verb helpers.
 
+  ## Token source precedence
+
+  This plug only writes `body_params["_csrf_token"]` when that key is
+  absent. Sources are considered in this order:
+
+  1. Existing `body_params["_csrf_token"]` — left untouched (Phoenix forms).
+  2. The source signal in `body_params` (default `csrf`) — POST/PUT/PATCH.
+  3. The same key inside the `datastar` query parameter — GET/DELETE.
+  4. A last-resort top-level `params` source key (not query `_csrf_token`).
+
+  A query-string `_csrf_token` is **not** a source and does **not** suppress
+  (2)–(4). `Plug.CSRFProtection` looks at `body_params`, not merged
+  `params`.
+
+  The `x-csrf-token` header is not read or written here.
+  `Plug.CSRFProtection` then validates `body_params["_csrf_token"]` first,
+  then the header. Prefer the header when you want the token out of URLs.
+
   ## Security note
 
   Because the token is a non-prefixed signal, it rides along on **every**
@@ -39,7 +57,13 @@ defmodule Dstar.Plugs.RenameCsrfParam do
   forgery protection. But a per-session credential sitting in URLs ends up
   in access/proxy logs and same-origin `Referer` headers. If that matters
   for your threat model, see the README's CSRF section for hardening
-  options (log scrubbing, `Referrer-Policy`, header-based transport).
+  options (redact the entire `datastar` query value from logs/APM, set
+  `Referrer-Policy` to `no-referrer` or `origin`, or send `x-csrf-token`).
+
+  Session and cookie authentication identify the user; they do not prove
+  who initiated the request. Cookie-authenticated state-changing routes
+  still need `Plug.CSRFProtection` (or a comparably strong Origin /
+  Fetch-Metadata policy).
 
   ## Usage
 
@@ -73,17 +97,25 @@ defmodule Dstar.Plugs.RenameCsrfParam do
 
   @impl Plug
   def call(conn, %{from: from, datastar_param: datastar_param}) do
-    case conn.params do
+    # Plug.CSRFProtection reads body_params, not merged params. A query
+    # `_csrf_token` must not suppress a body or datastar source.
+    case conn.body_params do
       %{"_csrf_token" => _} ->
         conn
 
       %{^from => token} ->
         put_csrf_token(conn, token)
 
-      params ->
-        case datastar_token(params, datastar_param, from) do
-          {:ok, token} -> put_csrf_token(conn, token)
-          :error -> conn
+      _ ->
+        case datastar_token(conn.params, datastar_param, from) do
+          {:ok, token} ->
+            put_csrf_token(conn, token)
+
+          :error ->
+            case conn.params do
+              %{^from => token} -> put_csrf_token(conn, token)
+              _ -> conn
+            end
         end
     end
   end
