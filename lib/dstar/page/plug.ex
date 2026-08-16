@@ -7,9 +7,10 @@ if Code.ensure_loaded?(Phoenix.Controller) do
       view pipeline (root layout, flash, `page_title` all apply).
     - `{:event, Module}` — POST `_event/:event`: reads signals, optional
       `authorize/2`, starts SSE, calls `handle_event/3`.
-    - `{:stream, Module}` — POST: optional `authorize/2`, starts SSE
-      (deduped when `stream_key/1` is defined), calls `handle_connect/2`,
-      then owns the receive loop dispatching to `handle_info/2`.
+    - `{:stream, Module}` — POST: optional `authorize/2`, atomically claims
+      dedup ownership when `stream_key/1` is defined, starts SSE, calls
+      `handle_connect/2`, then owns the receive loop dispatching to
+      `handle_info/2`. A keyed claim failure returns 503 before the callback.
 
     `authorize/2` is the pre-SSE seam: a halted or already-staged
     response is returned as ordinary HTTP and SSE never starts.
@@ -158,18 +159,23 @@ if Code.ensure_loaded?(Phoenix.Controller) do
           Dstar.SSE.start(conn)
         end
 
-      drain_stale_replaced()
+      # A keyed claim failure returns an ordinary halted 503 conn. It must not
+      # reach application connect callbacks or the receive loop.
+      if conn.state == :chunked do
+        conn =
+          try do
+            page.handle_connect(conn, conn.params)
+          rescue
+            exception ->
+              Dstar.Utility.StreamRegistry.release(conn)
+              log_crash(page, :handle_connect, exception, __STACKTRACE__)
+              reraise exception, __STACKTRACE__
+          end
 
-      conn =
-        try do
-          page.handle_connect(conn, conn.params)
-        rescue
-          exception ->
-            log_crash(page, :handle_connect, exception, __STACKTRACE__)
-            reraise exception, __STACKTRACE__
-        end
-
-      loop(conn, page, page.__dstar__(:idle_check))
+        loop(conn, page, page.__dstar__(:idle_check))
+      else
+        conn
+      end
     end
 
     defp loop(conn, page, idle_check) do
@@ -179,28 +185,32 @@ if Code.ensure_loaded?(Phoenix.Controller) do
         {:plug_conn, :sent} ->
           loop(conn, page, idle_check)
 
-        # Bandit's HTTP/2 stream runs in this same process and delivers
-        # flow-control messages ({:bandit, {:send_window_update, _}} etc.)
-        # to its mailbox, consuming them by selective receive inside its
-        # send path. The guard skips them so they stay in the mailbox —
-        # consuming them here would break flow control and stall the
-        # stream once the send window drains.
-        # A newer stream for the same `stream_key/1` is taking over. Bandit
-        # connection processes trap exits, so `Dstar.Utility.StreamRegistry`'s
-        # `Process.exit(pid, :replaced)` lands here as a message rather than
-        # killing us — halting is what makes the takeover take effect. Without
-        # this the old stream survives as a zombie holding the registry key,
-        # and every page would have to write this clause itself.
-        #
-        # The page still gets first refusal, because apps wrote this clause
-        # before the library handled the signal and their cleanup must keep
-        # running. Whatever it returns, the stream then ends: a takeover is
-        # not something a page may decline.
-        {:EXIT, _pid, :replaced} = msg ->
-          conn
-          |> offer_replaced(page, msg)
-          |> teardown(page)
+        # The coordinator tags replacement signals with the exact claim
+        # generation. A matching signal ends this stream; a stale generation
+        # left in a reused keep-alive process's mailbox is ignored.
+        {:EXIT, _pid, {:replaced, _claim}} = msg ->
+          if Dstar.Utility.StreamRegistry.replacement_for?(conn, msg) do
+            # Release before application teardown. The coordinator can no
+            # longer escalate this generation while a slow callback cleans up.
+            Dstar.Utility.StreamRegistry.release(conn)
+            public_msg = Dstar.Utility.StreamRegistry.public_replacement(msg)
 
+            conn
+            |> offer_replaced(page, public_msg)
+            |> teardown(page)
+          else
+            loop(conn, page, idle_check)
+          end
+
+        # Pre-generation replacement messages can only be stale after this
+        # implementation is running. Ignore them rather than poisoning the
+        # next request on a keep-alive connection.
+        {:EXIT, _pid, :replaced} ->
+          loop(conn, page, idle_check)
+
+        # Bandit's HTTP/2 stream consumes its own two-tuple flow-control
+        # messages by selective receive inside the send path. Leave them in
+        # the mailbox or the stream can stall when its send window drains.
         msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
           case dispatch_info(page, msg, conn) do
             {:halt, conn} -> teardown(conn, page)
@@ -212,25 +222,6 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             {:ok, conn} -> loop(conn, page, idle_check)
             {:error, conn} -> teardown(conn, page)
           end
-      end
-    end
-
-    # A keep-alive connection process is reused across requests and keeps its
-    # mailbox. A takeover signal that arrived after the previous loop stopped
-    # receiving is still parked there, and the loop below cannot tell it from
-    # a takeover of *this* stream — it would tear down a fresh stream nobody
-    # replaced, silently.
-    #
-    # Draining here is safe by construction: a `:replaced` meant for this
-    # stream can only be sent by a taker that found this process in the
-    # registry, which cannot happen before the registration just above. A
-    # legitimate signal landing inside the microsecond window between the two
-    # is backstopped by the taker's kill escalation.
-    defp drain_stale_replaced do
-      receive do
-        {:EXIT, _pid, :replaced} -> drain_stale_replaced()
-      after
-        0 -> :ok
       end
     end
 
@@ -254,7 +245,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     # socket — so without this everything the stream registered stays
     # registered, owned by a process now serving unrelated traffic.
     defp teardown(conn, page) do
-      Dstar.Utility.StreamRegistry.unregister_self()
+      Dstar.Utility.StreamRegistry.release(conn)
 
       if exported?(page, :handle_disconnect, 1) do
         try do

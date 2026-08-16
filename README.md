@@ -18,7 +18,7 @@ Other libraries give you SSE primitives and leave the rest to you. Dstar gives y
   `_`-prefixed signals client-side. So the token travels as a non-prefixed
   signal, and `Dstar.Plugs.RenameCsrfParam` maps it back — one plug, one
   `<body>` attribute, and forgery protection just works.
-- **Stream deduplication** — `Dstar.Utility.StreamRegistry` kills zombie SSE processes when users navigate between pages. One process per tab, always.
+- **Stream deduplication** — `Dstar.Utility.StreamRegistry` gives each user+tab one linearizable active owner and tears replaced SSE streams down with a bounded, generation-safe handover.
 - **Console logging** — `Dstar.console_log/2` sends log/warn/error messages straight to the browser DevTools. Debug from the server, read in the browser.
 - **Phoenix.HTML support** — `patch_elements` accepts both raw strings and `Phoenix.HTML.safe()` tuples, so HEEx template output works without conversion.
 
@@ -143,12 +143,16 @@ Declare how to subscribe; the library owns the receive loop:
 The loop checks connection liveness every 30s (tune with
 `use Dstar.Page, idle_check: 10_000`) and survives stray messages. Add a
 `stream_key/1` callback to enable per-tab stream deduplication via
-`Dstar.Utility.StreamRegistry`.
+`Dstar.Utility.StreamRegistry`. If a valid keyed stream cannot claim the
+coordinator, Page returns a normal halted 503 before `handle_connect/2` or the
+receive loop.
 
 When the loop ends — a `{:halt, conn}`, a dead client, or a takeover by a
-newer stream for the same key — the library unregisters the stream from
-`Dstar.Utility.StreamRegistry`. App-owned state (PubSub subscriptions,
-presence, caches) is yours to release in an optional `handle_disconnect/1`:
+newer stream for the same key — the library synchronously releases that exact
+claim generation before `handle_disconnect/1`. A stale takeover message cannot
+stop a newer stream reusing the same keep-alive process, and an escalation
+cannot kill the process after release returns. App-owned state (PubSub
+subscriptions, presence, caches) is yours to release in the optional callback:
 
 ```elixir
 def handle_disconnect(conn) do
@@ -268,7 +272,7 @@ Everything goes through the `Dstar` convenience module, which delegates to the l
 | Function | Does |
 |----------|------|
 | `start/1` | Open an SSE connection (`text/event-stream`, no-cache, chunked). |
-| `start_stream/2,3` | Open an SSE stream with per-tab dedup. Needs `Dstar.Utility.StreamRegistry`; arity 3 accepts signal-fetch options. |
+| `start_stream/2,3` | Atomically claim and open a per-tab SSE stream. Keyed claim failure returns a halted non-SSE 503; arity 3 accepts signal-fetch options. |
 | `check_connection/1` | `{:ok, conn}` / `{:error, conn}` — is the client still there? |
 | `fetch_signals/1,2` | Safely fetch object-only signals and return `{:ok, signals, conn}` or an input error with the updated conn. |
 | `read_signals/1` | Read signals only when body/query params are already fetched. |
@@ -424,9 +428,11 @@ PubSub broadcast or keepalive tick. In the meantime, zombie processes
 hold subscriptions, run wasted DB queries on every broadcast, and on
 HTTP/1.1 can exhaust the browser's 6-connection-per-origin limit.
 
-`Dstar.Utility.StreamRegistry` fixes this. It tracks one stream process
-per user+tab. When a new stream opens from the same tab, the previous
-one is killed instantly — zero-delay cleanup, no wasted work.
+`Dstar.Utility.StreamRegistry` fixes this. Its opt-in coordinator makes
+claims linearizable: every user+tab key has one active owner, even when many
+requests race. A new owner receives the key atomically, while the previous
+generation gets a graceful Page teardown window and then bounded kill
+escalation if it refuses to release.
 
 This is the **one process** in Dstar. It's opt-in: if you don't need it,
 the library stays zero-process. If you do, you add one child to your
@@ -466,26 +472,45 @@ across navigations but is unique per tab. Multiple tabs work independently.
 
 ### 3. Replace `Dstar.start(conn)` in stream controllers
 
-```diff
-- conn = Dstar.start(conn)
-+ conn = Dstar.start_stream(conn, scope.user.id)
+```elixir
+conn = Dstar.start_stream(conn, scope.user.id)
+
+if conn.halted do
+  # A valid keyed request could not claim the coordinator. This is an
+  # ordinary non-SSE 503 response; do not subscribe or enter the loop.
+  conn
+else
+  Phoenix.PubSub.subscribe(MyApp.PubSub, "updates")
+
+  try do
+    loop(conn)
+  after
+    Dstar.Utility.StreamRegistry.release(conn)
+    Phoenix.PubSub.unsubscribe(MyApp.PubSub, "updates")
+  end
+end
 ```
 
 The second argument is any term that identifies the user or session
-(e.g., `user.id`, `{user.id, workspace.id}`). The registry keys on
+(e.g., `user.id`, `{user.id, workspace.id}`). The coordinator keys on
 `{scope_key, tab_id}` so different users and different tabs never collide.
+It calls `Dstar.start/1` only after a keyed claim succeeds. If that claim
+fails, it fails closed with a halted, plain-text 503 conn — never an
+undeduplicated stream advertised as deduplicated.
 
-If no `tabId` signal is present in the request, `start_stream/2` falls
-back to `Dstar.start/1` — so existing streams keep working while you
-roll out the client-side signal.
+If no usable `tabId` signal is present, `start_stream/2` intentionally falls
+back to `Dstar.start/1` so existing streams keep working during rollout. That
+unkeyed fallback is different from a failed claim. On every loop exit,
+hand-rolled streams should call `Dstar.Utility.StreamRegistry.release(conn)`;
+`Dstar.Page` does this automatically before `handle_disconnect/1`.
 
 ### What it does
 
 | Scenario | Before | After |
 |---|---|---|
-| User clicks 5 pages in 3s (same tab) | 5 zombie processes doing wasted PubSub work | 1 process per tab, always |
-| 3 tabs open | 3 streams (fine) | 3 streams (unchanged) |
-| 100 users rapid nav | Spikes of zombies doing wasted DB queries | Max 100 processes, zero wasted work |
+| User clicks 5 pages in 3s (same tab) | 5 zombie processes doing wasted PubSub work | 1 active owner; displaced generations are tracked through bounded teardown |
+| 3 tabs open | 3 streams (fine) | 3 active owners (unchanged) |
+| Concurrent reconnect burst | Claim/register race can leave an untracked stream | Claims are serialized; final claimant is the sole active owner |
 
 ### Deduplication vs. auto-reconnect
 

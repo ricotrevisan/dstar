@@ -8,14 +8,14 @@ PhoenixDatastar is **deprecated as of v0.2.0** — no further updates are planne
 
 | | PhoenixDatastar | Dstar |
 |---|---|---|
-| **Architecture** | Behaviours, GenServers, Socket structs, Registry, supervision trees | ~700 lines of pure functions |
+| **Architecture** | Behaviours, GenServers, Socket structs, Registry, supervision trees | Functional core of pure functions; optional Page layer and one opt-in stream coordinator |
 | **State** | `Socket` with assigns + signals + event queue | Direct `Plug.Conn` — no wrapper structs |
 | **Routing** | Custom macros (`datastar_session`, `datastar`) | Standard Phoenix routes |
 | **Views** | Stateless + Live view modes via `use` macro | Plain controller actions |
 | **Real-time** | Built-in GenServer per session | PubSub + receive loop (you own it) |
 | **Navigation** | Soft nav system (NavPlug, RouteRegistry, tokens) | Standard links / Datastar client-side nav |
 | **Dependencies** | Phoenix (full framework) | Plug + Jason only |
-| **Config** | `config :phoenix_datastar`, Registry in supervision tree | Nothing — zero config |
+| **Config** | `config :phoenix_datastar`, Registry in supervision tree | Zero required config; optionally supervise `Dstar.Utility.StreamRegistry` for per-tab dedup |
 
 The tradeoff is clear: PhoenixDatastar gave you more batteries (session management, soft navigation, process-backed state). Dstar gives you **raw primitives** and gets out of your way. You write less library code and more application code.
 
@@ -61,6 +61,21 @@ children = [
   # ...
 ]
 ```
+
+If you opt into Dstar's per-tab stream deduplication, add its coordinator
+instead of the old PhoenixDatastar registry:
+
+```elixir
+children = [
+  Dstar.Utility.StreamRegistry,
+  # ...
+]
+```
+
+This coordinator is optional. Its claims are linearizable and generation-safe;
+a valid keyed request that cannot claim returns a halted non-SSE 503 instead of
+starting an untracked stream. Missing/invalid `tabId` remains an intentional
+unkeyed rollout fallback.
 
 ### Configuration
 
@@ -420,6 +435,14 @@ defmodule MyAppWeb.GameStreamController do
   end
 end
 ```
+
+For navigation-heavy streams, optionally replace `Dstar.start/1` with
+`Dstar.start_stream/2` after adding the coordinator and `tabId` signal above.
+A hand-rolled controller must return immediately when the conn is halted (keyed
+claim failure = non-SSE 503), subscribe only after success, and call
+`Dstar.Utility.StreamRegistry.release(conn)` in an `after` block. Page modules
+get that fail-closed claim and exact generation release automatically from
+`stream_key/1`.
 
 ```heex
 <%!-- game.html.heex --%>

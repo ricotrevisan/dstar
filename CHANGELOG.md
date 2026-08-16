@@ -4,6 +4,27 @@
 
 ### Security
 
+- **StreamRegistry claims and takeovers are now linearizable and fail closed
+  (#32).** The opt-in registry is one coordinator process that serializes claim
+  generations. Concurrent contenders have defined ordered outcomes, every
+  successful generation remains tracked through handover, and the final
+  claimant is the sole active owner.
+
+  `start_stream/2,3` now calls `Dstar.start/1` only after a keyed claim
+  succeeds. Coordinator failure returns a halted, non-SSE 503 conn instead of
+  silently starting an undeduplicated stream; missing/invalid `tabId` remains
+  the intentional unkeyed rollout fallback. `Dstar.Page` skips
+  `handle_connect/2` and its loop on that failure.
+
+  Replacements carry an opaque generation capability. Their internal exit
+  reason is now tagged; Page preserves the legacy `:replaced` shape for
+  application callbacks. Hand-rolled loops should use `start_stream/2,3` and
+  `release/1` instead of consuming that internal message. Page ignores stale
+  replacement messages on reused keep-alive processes and synchronously
+  releases the exact claim before disconnect cleanup. Release and escalation
+  are serialized, so escalation cannot kill a process after its release has
+  returned; uncooperative trapping holders still face bounded kill escalation.
+
 - **Signal fetching is now bounded, object-only, and conn-safe (#29).**
   `Dstar.Signals.fetch/2` (also `Dstar.fetch_signals/2`) returns the parsed
   signal map together with Plug's updated conn, accepts JSON objects only,

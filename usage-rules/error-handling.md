@@ -45,6 +45,21 @@ into the event name is not an authorization check.
 
 ---
 
+## 0.5 Keyed stream claim failures
+
+`Dstar.start_stream/2,3` fails closed for a valid `tabId`: if the opt-in
+`Dstar.Utility.StreamRegistry` cannot atomically claim the key, it returns a
+halted plain-text 503 conn and does **not** start SSE. A hand-rolled controller
+must check `conn.halted` before subscribing or entering its loop. Missing or
+invalid `tabId` is different — it is the intentional unkeyed rollout fallback.
+
+`Dstar.Page` handles the branch automatically: `handle_connect/2` and the loop
+never run after claim failure. It also releases the exact ownership generation
+before `handle_disconnect/1`, so stale escalation cannot kill a reused
+keep-alive process.
+
+---
+
 ## 1. Rescue in Handlers
 
 Wrap handler logic in explicit error handling. Send error signals back to the client on failure.

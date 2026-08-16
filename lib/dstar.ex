@@ -41,10 +41,16 @@ defmodule Dstar do
   @doc """
   Starts an SSE stream with per-tab deduplication.
 
-  Requires `Dstar.Utility.StreamRegistry` in your supervision tree
-  and a `tabId` signal in your root layout. See
-  `Dstar.Utility.StreamRegistry` module docs for setup. Pass `max_bytes: n`
-  as a third argument to bound raw/query signal input per call.
+  Requires `Dstar.Utility.StreamRegistry` in your supervision tree and a
+  `tabId` signal in your root layout. A usable `tabId` is claimed atomically
+  before SSE starts. Claim failure returns a halted, plain-text 503 conn; it
+  never starts an undeduplicated keyed stream. Missing/invalid `tabId` is the
+  intentional unkeyed fallback.
+
+  Hand-rolled loops must check `conn.halted` before subscribing/looping and
+  call `Dstar.Utility.StreamRegistry.release(conn)` during teardown. See that
+  module's docs for setup. Pass `max_bytes: n` as a third argument to bound
+  raw/query signal input per call.
 
   ## Example
 

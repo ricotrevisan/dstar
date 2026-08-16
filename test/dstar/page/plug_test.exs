@@ -1,5 +1,5 @@
 defmodule Dstar.Page.PlugTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   import Plug.Test
   import Dstar.Test
 
@@ -309,7 +309,7 @@ defmodule Dstar.Page.PlugTest do
       assert conn.resp_body == "Unauthorized"
       refute_received {:stream_key, _}
       refute_received {:connected, _, _}
-      assert Registry.lookup(StreamRegistry, {{:auth_scope, :alice}, "tab-denied"}) == []
+      assert StreamRegistry.owner({{:auth_scope, :alice}, "tab-denied"}) == :error
     end
 
     test "authorized stream POSTs keep authorize/2 assigns for stream_key and handle_connect" do
@@ -338,8 +338,8 @@ defmodule Dstar.Page.PlugTest do
       assert_receive {:stream_key, :alice}, 1_000
       assert_receive {:connected, stream_pid, :alice}, 1_000
 
-      assert [{^stream_pid, _}] =
-               Registry.lookup(StreamRegistry, {{:auth_scope, :alice}, "tab-ok"})
+      assert {:ok, ^stream_pid, _claim} =
+               StreamRegistry.owner({{:auth_scope, :alice}, "tab-ok"})
 
       send(stream_pid, :halt_now)
       conn = Task.await(task, 2_000)
@@ -467,6 +467,40 @@ defmodule Dstar.Page.PlugTest do
       assert conn.state == :chunked
     end
 
+    test "a keyed claim failure returns 503 before handle_connect or the loop" do
+      Process.register(self(), :dstar_plug_stream_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_stream_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      registry = Process.whereis(Dstar.Utility.StreamRegistry)
+      :ok = GenServer.stop(registry)
+
+      conn =
+        try do
+          conn(:post, "/keyed")
+          |> Map.put(:body_params, %{"tabId" => "registry-down"})
+          |> PagePlug.call(PagePlug.init({:stream, KeyedStreamPage}))
+        after
+          {:ok, _pid} = Dstar.Utility.StreamRegistry.start(grace_ms: 100)
+        end
+
+      assert conn.status == 503
+      assert conn.state == :sent
+      assert conn.halted
+
+      refute Plug.Conn.get_resp_header(conn, "content-type") == [
+               "text/event-stream; charset=utf-8"
+             ]
+
+      refute_received {:keyed_connected, _pid}
+    end
+
     test "opens via start_stream when stream_key/1 is defined" do
       Process.register(self(), :dstar_plug_stream_test)
 
@@ -526,6 +560,11 @@ defmodule Dstar.Page.PlugTest do
         conn
       end
 
+      def handle_info({:ping, from}, conn) do
+        send(from, :pong)
+        conn
+      end
+
       def handle_info(:halt_now, conn), do: {:halt, conn}
     end
 
@@ -573,7 +612,7 @@ defmodule Dstar.Page.PlugTest do
     test "releases its registry key when the loop halts" do
       pid = run_stream(TeardownPage, "tab-teardown-1")
 
-      assert [{^pid, _}] = Registry.lookup(StreamRegistry, {:teardown_scope, "tab-teardown-1"})
+      assert {:ok, ^pid, _claim} = StreamRegistry.owner({:teardown_scope, "tab-teardown-1"})
 
       send(pid, :halt_now)
       assert_receive {:loop_returned, _conn}, 1_000
@@ -581,7 +620,7 @@ defmodule Dstar.Page.PlugTest do
       # The connection process is still alive — as it would be between
       # keep-alive requests — so nothing but the loop can have released this.
       assert Process.alive?(pid)
-      assert Registry.lookup(StreamRegistry, {:teardown_scope, "tab-teardown-1"}) == []
+      assert StreamRegistry.owner({:teardown_scope, "tab-teardown-1"}) == :error
 
       Process.exit(pid, :kill)
     end
@@ -618,10 +657,37 @@ defmodule Dstar.Page.PlugTest do
       # Graceful: the old process released the key and was left alive,
       # rather than being killed mid-request.
       assert Process.alive?(pid)
-      assert [{^new_pid, _}] = Registry.lookup(StreamRegistry, {:teardown_scope, "tab-takeover"})
+      assert {:ok, ^new_pid, _claim} = StreamRegistry.owner({:teardown_scope, "tab-takeover"})
 
       Process.exit(pid, :kill)
       Process.exit(new_pid, :kill)
+    end
+
+    test "real Page streams support successive A to B to C takeovers" do
+      key = {:teardown_scope, "tab-successive"}
+      first = run_stream(DisconnectPage, "tab-successive", trap_exits: true)
+      assert {:ok, ^first, _claim} = StreamRegistry.owner(key)
+
+      second = run_stream(DisconnectPage, "tab-successive", trap_exits: true)
+      assert_receive {:disconnected, ^first}, 1_000
+      assert_receive {:loop_returned, _first_conn}, 1_000
+      assert Process.alive?(first)
+      assert {:ok, ^second, _claim} = StreamRegistry.owner(key)
+
+      third = run_stream(DisconnectPage, "tab-successive", trap_exits: true)
+      assert_receive {:disconnected, ^second}, 1_000
+      assert_receive {:loop_returned, _second_conn}, 1_000
+      assert Process.alive?(second)
+      assert {:ok, ^third, _claim} = StreamRegistry.owner(key)
+
+      send(third, {:ping, self()})
+      assert_receive :pong, 1_000
+      send(third, :halt_now)
+      assert_receive {:disconnected, ^third}, 1_000
+      assert_receive {:loop_returned, _third_conn}, 1_000
+      assert StreamRegistry.owner(key) == :error
+
+      Enum.each([first, second, third], &Process.exit(&1, :kill))
     end
 
     defmodule StalePage do
@@ -659,6 +725,10 @@ defmodule Dstar.Page.PlugTest do
       # Apps wrote this clause before the library handled the signal — it
       # must keep running, or their cleanup silently stops happening.
       def handle_info({:EXIT, _pid, :replaced}, conn) do
+        # Longer than the test registry's grace window. The library must
+        # release its generation before offering this callback or escalation
+        # kills this reusable process halfway through cleanup.
+        Process.sleep(150)
         send(:dstar_plug_stream_test, {:own_clause_ran, self()})
         {:halt, conn}
       end
@@ -668,13 +738,22 @@ defmodule Dstar.Page.PlugTest do
 
     test "a page's own {:EXIT, _, :replaced} clause still runs on takeover" do
       pid = run_stream(OwnReplacedClausePage, "tab-own-clause", trap_exits: true)
+      parent = self()
 
-      send(pid, {:EXIT, self(), :replaced})
+      taker =
+        spawn(fn ->
+          :ok = StreamRegistry.replace_and_register({:teardown_scope, "tab-own-clause"})
+          send(parent, {:took_over, self()})
+          Process.sleep(:infinity)
+        end)
 
       assert_receive {:own_clause_ran, ^pid}, 1_000
       assert_receive {:loop_returned, _conn}, 1_000
+      assert_receive {:took_over, ^taker}, 1_000
+      assert Process.alive?(pid)
 
       Process.exit(pid, :kill)
+      Process.exit(taker, :kill)
     end
 
     test "a takeover on a page with no such clause logs no unhandled-message warning" do
@@ -683,10 +762,20 @@ defmodule Dstar.Page.PlugTest do
       log =
         capture_log(fn ->
           pid = run_stream(DisconnectPage, "tab-quiet", trap_exits: true)
-          send(pid, {:EXIT, self(), :replaced})
+          parent = self()
+
+          taker =
+            spawn(fn ->
+              :ok = StreamRegistry.replace_and_register({:teardown_scope, "tab-quiet"})
+              send(parent, {:took_over, self()})
+              Process.sleep(:infinity)
+            end)
+
           assert_receive {:disconnected, ^pid}, 1_000
           assert_receive {:loop_returned, _conn}, 1_000
+          assert_receive {:took_over, ^taker}, 1_000
           Process.exit(pid, :kill)
+          Process.exit(taker, :kill)
         end)
 
       refute log =~ "unhandled message"
@@ -707,8 +796,10 @@ defmodule Dstar.Page.PlugTest do
       pid =
         spawn(fn ->
           Process.flag(:trap_exit, true)
-          # Left over from the previous request on this socket.
+          # Left over from previous requests on this socket: one legacy
+          # signal and one generation-tagged signal for a different claim.
           send(self(), {:EXIT, parent, :replaced})
+          send(self(), {:EXIT, parent, {:replaced, make_ref()}})
 
           returned = PagePlug.call(conn, PagePlug.init({:stream, StalePage}))
           send(parent, {:loop_returned, returned})

@@ -169,6 +169,7 @@ All functions in `Dstar` module:
 ### Connection
 
 - **`Dstar.start(conn)`** — Opens SSE connection (chunked, text/event-stream)
+- **`Dstar.start_stream(conn, scope_key, opts \\ [])`** — Atomically claims a per-tab keyed stream, or returns a halted non-SSE 503 on keyed claim failure; missing/invalid `tabId` is the intentional unkeyed fallback
 - **`Dstar.check_connection(conn)`** — Tests if SSE connection is still open. Returns `{:ok, conn}` if active, `{:error, conn}` if closed. Useful for detecting disconnections in streaming loops
 
 ### Signals
@@ -272,6 +273,15 @@ defp loop(conn) do
   end
 end
 ```
+
+For optional per-tab deduplication, supervise
+`Dstar.Utility.StreamRegistry`, provide a `data-signals:tab-id` backed by
+`sessionStorage`, and use `Dstar.start_stream/2`. Check `conn.halted` before
+subscribing/looping: a valid keyed claim failure is a normal non-SSE 503 and
+fails closed, while a missing/invalid `tabId` intentionally starts unkeyed.
+Claims are linearizable; release hand-rolled loops with
+`Dstar.Utility.StreamRegistry.release(conn)` in an `after` block. Pages do this
+automatically when `stream_key/1` is defined, before `handle_disconnect/1`.
 
 Client reconnection:
 ```heex

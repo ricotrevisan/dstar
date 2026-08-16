@@ -1,2 +1,2 @@
-{:ok, _} = Registry.start_link(keys: :unique, name: Dstar.Utility.StreamRegistry)
+{:ok, _} = Dstar.Utility.StreamRegistry.start(grace_ms: 100)
 ExUnit.start(exclude: [:browser])
