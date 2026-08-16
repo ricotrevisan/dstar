@@ -2,6 +2,30 @@
 
 Copy-pasteable code examples for common Dstar use cases.
 
+## Signal input boundary
+
+The controller examples below use `Dstar.read_signals/1` because Phoenix's
+`Plug.Parsers` has already produced a body-param map. Configure that parser
+with bounded `:length` and `:read_length` values. It must accept JSON objects;
+Dstar Page/Dispatch reject malformed or non-object signal documents with 400
+and raw inputs over their `:max_signal_bytes` limit with 413.
+
+A plain Plug that still owns the raw body must use the conn-returning API:
+
+```elixir
+case Dstar.fetch_signals(conn, max_bytes: 64_000) do
+  {:ok, signals, conn} ->
+    conn |> Dstar.start() |> Dstar.patch_signals(process(signals))
+
+  {:error, reason, conn} ->
+    Dstar.Signals.send_error(conn, reason)
+end
+```
+
+Always pass that returned conn forward. GET/DELETE carry the same JSON in the
+`datastar` query parameter and are checked against the same byte limit before
+decoding.
+
 ## Stateless Counter
 
 **Controller:**

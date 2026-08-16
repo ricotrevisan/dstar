@@ -13,7 +13,10 @@ if Code.ensure_loaded?(Phoenix.Controller) do
 
     `authorize/2` is the pre-SSE seam: a halted or already-staged
     response is returned as ordinary HTTP and SSE never starts.
-    `mount/2` does not run on event or stream POSTs.
+    Before authorization, signals are fetched with the page's
+    `:max_signal_bytes` limit; malformed/non-object payloads return 400 and
+    oversized payloads return 413. `mount/2` does not run on event or stream
+    POSTs.
 
     All control flow lives here as plain functions — pages contain only
     callbacks.
@@ -78,14 +81,19 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             "missing :event path param — route the event POST with an `:event` segment"
           )
 
-      signals = Dstar.Signals.read(conn)
-      conn = maybe_authorize(conn, page, {:event, event})
+      case Dstar.Signals.fetch(conn, max_bytes: page.__dstar__(:max_signal_bytes)) do
+        {:ok, signals, conn} ->
+          conn = maybe_authorize(conn, page, {:event, event})
 
-      if response_committed?(conn) do
-        conn
-      else
-        conn = Dstar.SSE.start(conn)
-        dispatch_event(conn, page, event, signals)
+          if response_committed?(conn) do
+            conn
+          else
+            conn = Dstar.SSE.start(conn)
+            dispatch_event(conn, page, event, signals)
+          end
+
+        {:error, reason, conn} ->
+          Dstar.Signals.send_error(conn, reason)
       end
     end
 
@@ -121,12 +129,19 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     defp stream(conn, page) do
       if exported?(page, :handle_connect, 2) do
         conn = fetch_query_params(conn)
-        conn = maybe_authorize(conn, page, {:stream, conn.params})
 
-        if response_committed?(conn) do
-          conn
-        else
-          open_stream(conn, page)
+        case Dstar.Signals.fetch(conn, max_bytes: page.__dstar__(:max_signal_bytes)) do
+          {:ok, _signals, conn} ->
+            conn = maybe_authorize(conn, page, {:stream, conn.params})
+
+            if response_committed?(conn) do
+              conn
+            else
+              open_stream(conn, page)
+            end
+
+          {:error, reason, conn} ->
+            Dstar.Signals.send_error(conn, reason)
         end
       else
         conn
