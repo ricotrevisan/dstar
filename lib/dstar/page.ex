@@ -56,6 +56,9 @@ defmodule Dstar.Page do
 
   - `:idle_check` — ms between connection liveness checks in the stream
     loop (default `30_000`).
+  - `:max_signal_bytes` — maximum raw signal JSON size for event and stream
+    requests (default `1_000_000`). Configure `Plug.Parsers` to the same or
+    a smaller limit when it reads bodies before the page plug.
   """
 
   @doc "GET: load data and assign what `render/1` needs. Optional."
@@ -67,8 +70,8 @@ defmodule Dstar.Page do
   @doc """
   Pre-SSE gate for event and stream POSTs. Optional.
 
-  Invoked after query params (and, for events, signals) are read, and
-  before `Dstar.SSE.start/1` or `Dstar.start_stream/2`. The second
+  Invoked after query params and signals are safely read, and before
+  `Dstar.SSE.start/1` or `Dstar.start_stream/2`. The second
   argument is `{:event, event}` or `{:stream, params}`.
 
   Same skip rule as `mount/2`: if the returned conn is halted or has
@@ -100,8 +103,9 @@ defmodule Dstar.Page do
 
   Session-wide authentication still belongs in the router pipeline.
   This callback is for page/resource checks and preconditions. Signals
-  are already parsed; read them with `Dstar.Signals.read/1` if a check
-  needs the payload.
+  are already parsed and cached in `body_params`; read them with
+  `Dstar.Signals.read/1` if a check needs the payload. Invalid input was
+  already returned as a normal 400/413 response.
 
   Does not run on GET — that is `mount/2`.
   """
@@ -179,6 +183,7 @@ defmodule Dstar.Page do
     end
 
     idle_check = Keyword.get(opts, :idle_check, @default_idle_check)
+    max_signal_bytes = Keyword.get(opts, :max_signal_bytes, Dstar.Signals.default_max_bytes())
 
     quote do
       @behaviour Dstar.Page
@@ -225,6 +230,7 @@ defmodule Dstar.Page do
 
       @doc false
       def __dstar__(:idle_check), do: unquote(idle_check)
+      def __dstar__(:max_signal_bytes), do: unquote(max_signal_bytes)
     end
   end
 end

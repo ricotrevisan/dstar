@@ -196,6 +196,41 @@ defmodule Dstar.Utility.StreamRegistryTest do
       assert {scope, "6f1c9b3e-tab"} in registered_keys()
     end
 
+    test "safely reads a raw object and threads the conn into SSE" do
+      scope = make_ref()
+
+      conn =
+        conn(:post, "/stream", ~s({"tabId":"raw-tab"}))
+        |> StreamRegistry.start_stream(scope)
+
+      assert {scope, "raw-tab"} in registered_keys()
+      assert conn.state == :chunked
+      assert conn.body_params == %{"tabId" => "raw-tab"}
+    end
+
+    test "malformed and non-object signals fail before registry claim or SSE" do
+      for body <- ["{", "[]", "null"] do
+        scope = make_ref()
+        conn = conn(:post, "/stream", body) |> StreamRegistry.start_stream(scope)
+
+        assert conn.status == 400
+        assert conn.state == :sent
+        refute Enum.any?(registered_keys(), &match?({^scope, _}, &1))
+      end
+    end
+
+    test "oversized signals receive 413 before registry claim or SSE" do
+      scope = make_ref()
+
+      conn =
+        conn(:post, "/stream", ~s({"tabId":"too-long"}))
+        |> StreamRegistry.start_stream(scope, max_bytes: 8)
+
+      assert conn.status == 413
+      assert conn.state == :sent
+      refute Enum.any?(registered_keys(), &match?({^scope, _}, &1))
+    end
+
     test "an empty tabId does not claim a key" do
       # Every tab sending "" would collide on one key and kill each other.
       scope = make_ref()

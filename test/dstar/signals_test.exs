@@ -4,6 +4,19 @@ defmodule Dstar.SignalsTest do
 
   alias Dstar.{Signals, SSE}
 
+  defmodule SequencedAdapter do
+    def read_req_body({test_pid, [{tag, chunk} | rest], reads}, opts)
+        when tag in [:ok, :more] do
+      send(test_pid, {:sequenced_read, reads, opts})
+      {tag, chunk, {test_pid, rest, reads + 1}}
+    end
+
+    def read_req_body({test_pid, [{:error, reason} | _rest], reads}, opts) do
+      send(test_pid, {:sequenced_read, reads, opts})
+      {:error, reason}
+    end
+  end
+
   # Helper to create a chunked SSE conn
   defp chunked_conn do
     conn(:post, "/test")
@@ -27,47 +40,142 @@ defmodule Dstar.SignalsTest do
     end
   end
 
-  describe "read/1" do
-    test "reads signals from GET query params" do
-      conn = %Plug.Conn{
-        method: "GET",
-        query_params: %{"datastar" => ~s({"count":42})}
-      }
+  describe "fetch/2" do
+    test "accepts JSON objects from GET and DELETE query params" do
+      for method <- [:get, :delete] do
+        conn = conn(method, "/?datastar=" <> URI.encode_www_form(~s({"count":42})))
 
-      assert Signals.read(conn) == %{"count" => 42}
+        assert {:ok, %{"count" => 42}, fetched_conn} = Signals.fetch(conn)
+        assert is_map(fetched_conn.query_params)
+      end
     end
 
-    test "returns empty map when no datastar param on GET" do
-      conn = %Plug.Conn{method: "GET", query_params: %{}}
-      assert Signals.read(conn) == %{}
+    test "returns an empty map when no signals are present" do
+      assert {:ok, %{}, _conn} = Signals.fetch(conn(:get, "/"))
+      assert {:ok, %{}, _conn} = Signals.fetch(conn(:post, "/", ""))
     end
 
-    test "reads signals from DELETE query params" do
-      conn = %Plug.Conn{
-        method: "DELETE",
-        query_params: %{"datastar" => ~s({"id":7})}
-      }
+    test "accepts already-fetched body param maps without reading the adapter" do
+      conn = conn(:post, "/") |> Map.put(:body_params, %{"count" => 10})
 
-      assert Signals.read(conn) == %{"id" => 7}
+      assert {:ok, %{"count" => 10}, ^conn} = Signals.fetch(conn)
+      assert Signals.read(conn) == %{"count" => 10}
     end
 
-    test "returns empty map when no datastar param on DELETE" do
-      conn = %Plug.Conn{method: "DELETE", query_params: %{}}
-      assert Signals.read(conn) == %{}
+    test "rejects Plug.Parsers' _json wrapper for a non-object document" do
+      for value <- [[], "value", 42, true, nil] do
+        conn = conn(:post, "/") |> Map.put(:body_params, %{"_json" => value})
+        assert {:error, :not_an_object, ^conn} = Signals.fetch(conn)
+      end
     end
 
-    test "reads signals from POST body params" do
-      conn = %Plug.Conn{
-        method: "POST",
-        body_params: %{"count" => 10, "name" => "test"}
-      }
+    test "accepts an already-fetched object that has _json plus real signal keys" do
+      body_params = %{"_json" => "metadata", "count" => 1}
+      conn = conn(:post, "/") |> Map.put(:body_params, body_params)
 
-      assert Signals.read(conn) == %{"count" => 10, "name" => "test"}
+      assert {:ok, ^body_params, ^conn} = Signals.fetch(conn)
+      assert Signals.read(conn) == body_params
     end
 
-    test "returns empty map for empty body" do
-      conn = %Plug.Conn{method: "POST", body_params: %{}}
-      assert Signals.read(conn) == %{}
+    test "rejects arrays, scalars, and null from either transport" do
+      for json <- ["[]", ~s("value"), "42", "true", "null"] do
+        query_conn = conn(:get, "/?datastar=" <> URI.encode_www_form(json))
+        body_conn = conn(:post, "/", json)
+
+        assert {:error, :not_an_object, _conn} = Signals.fetch(query_conn)
+        assert {:error, :not_an_object, _conn} = Signals.fetch(body_conn)
+      end
+    end
+
+    test "reports malformed JSON instead of treating it as empty signals" do
+      assert {:error, :malformed, _conn} = Signals.fetch(conn(:post, "/", "{"))
+
+      for json <- ["{", ""] do
+        query_conn = conn(:delete, "/?datastar=" <> URI.encode_www_form(json))
+        assert {:error, :malformed, _conn} = Signals.fetch(query_conn)
+      end
+    end
+
+    test "accepts a payload exactly at max_bytes on both transports" do
+      json = ~s({"a":1})
+      assert byte_size(json) == 7
+
+      assert {:ok, %{"a" => 1}, _conn} = Signals.fetch(conn(:post, "/", json), max_bytes: 7)
+
+      query_conn = conn(:get, "/?datastar=" <> URI.encode_www_form(json))
+      assert {:ok, %{"a" => 1}, _conn} = Signals.fetch(query_conn, max_bytes: 7)
+    end
+
+    test "rejects raw bodies over max_bytes and returns the updated conn" do
+      conn = conn(:post, "/", ~s({"value":"too long"}))
+
+      assert {:error, :too_large, updated_conn} = Signals.fetch(conn, max_bytes: 8)
+      assert updated_conn != conn
+      assert {:ok, _remaining, drained_conn} = Plug.Conn.read_body(updated_conn)
+      assert drained_conn != updated_conn
+    end
+
+    test "rejects GET/DELETE payloads over the same max_bytes before decoding" do
+      json = ~s({"value":"too long"})
+
+      for method <- [:get, :delete] do
+        conn = conn(method, "/?datastar=" <> URI.encode_www_form(json))
+        assert {:error, :too_large, _conn} = Signals.fetch(conn, max_bytes: 8)
+      end
+    end
+
+    test "bounds both adapter read options at max_bytes" do
+      test_pid = self()
+
+      defmodule OptionsAdapter do
+        def read_req_body({test_pid, body}, opts) do
+          send(test_pid, {:read_opts, opts})
+          {:ok, body, {test_pid, ""}}
+        end
+      end
+
+      conn = %{conn(:post, "/") | adapter: {OptionsAdapter, {test_pid, ~s({"ok":true})}}}
+
+      assert {:ok, %{"ok" => true}, _conn} = Signals.fetch(conn, max_bytes: 1234)
+      assert_receive {:read_opts, opts}
+      assert opts[:length] == 1234
+      assert opts[:read_length] == 1234
+    end
+
+    test "threads the conn through partial reads and accumulates within the limit" do
+      state = {self(), [{:more, ~s({"count)}, {:ok, ~s(":1})}], 0}
+      conn = %{conn(:post, "/") | adapter: {SequencedAdapter, state}}
+
+      assert {:ok, %{"count" => 1}, fetched_conn} = Signals.fetch(conn, max_bytes: 20)
+      assert {SequencedAdapter, {_test_pid, [], 2}} = fetched_conn.adapter
+      assert_receive {:sequenced_read, 0, first_opts}
+      assert_receive {:sequenced_read, 1, second_opts}
+      assert first_opts[:length] == 20
+      assert second_opts[:length] == 13
+    end
+
+    test "an adapter error after a partial read returns the latest conn" do
+      state = {self(), [{:more, "{"}, {:error, :closed}], 0}
+      conn = %{conn(:post, "/") | adapter: {SequencedAdapter, state}}
+
+      assert {:error, {:read_body, :closed}, updated_conn} = Signals.fetch(conn, max_bytes: 20)
+      assert {SequencedAdapter, {_test_pid, [{:error, :closed}], 1}} = updated_conn.adapter
+    end
+
+    test "returns first-call adapter errors with the original conn" do
+      defmodule ErrorAdapter do
+        def read_req_body(:state, _opts), do: {:error, :closed}
+      end
+
+      conn = %{conn(:post, "/") | adapter: {ErrorAdapter, :state}}
+
+      assert {:error, {:read_body, :closed}, ^conn} = Signals.fetch(conn)
+    end
+
+    test "read/1 rejects unfetched raw bodies because it cannot return the updated conn" do
+      assert_raise ArgumentError, ~r/Signals.fetch\/2/, fn ->
+        Signals.read(conn(:post, "/", ~s({"count":1})))
+      end
     end
   end
 

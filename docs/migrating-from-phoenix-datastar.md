@@ -227,6 +227,31 @@ end
 </div>
 ```
 
+### Signal parsing and raw body ownership
+
+Phoenix controllers normally receive a conn whose JSON `body_params` were
+already fetched by `Plug.Parsers`, so `Dstar.read_signals/1` remains the
+map-only convenience used in the examples here. Bound both the parser's
+`:length` and `:read_length` at or below your signal limit; Dstar cannot
+retroactively measure an already-parsed map.
+
+For a plain Plug or custom controller pipeline with an unfetched body, migrate
+to the conn-returning boundary:
+
+```elixir
+case Dstar.fetch_signals(conn, max_bytes: 64_000) do
+  {:ok, signals, conn} -> handle(conn, signals)
+  {:error, reason, conn} -> Dstar.Signals.send_error(conn, reason)
+end
+```
+
+This accepts JSON objects only, returns observable 400 errors for
+malformed/non-object input and 413 for oversized input, and threads the conn
+updated by every `Plug.Conn.read_body/2` call. GET/DELETE still use the
+`datastar` query parameter and enforce the same configured limit before
+decoding. Dstar Page and Dispatch perform this boundary automatically
+(default 1,000,000 bytes; configure `:max_signal_bytes`).
+
 **Key differences:**
 - No `mount/3` — initial state goes in the template via `data-signals`
 - No `socket` — work directly with `conn`

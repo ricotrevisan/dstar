@@ -141,6 +141,27 @@ def handle_event(conn, _params) do
 end
 ```
 
+This map-only form is for Phoenix/Plug pipelines where `Plug.Parsers` already
+populated `body_params`. A plain Plug that owns the raw body must thread the
+updated conn:
+
+```elixir
+case Dstar.fetch_signals(conn, max_bytes: 64_000) do
+  {:ok, signals, conn} ->
+    conn |> Dstar.start() |> Dstar.patch_signals(process(signals))
+
+  {:error, reason, conn} ->
+    Dstar.Signals.send_error(conn, reason)
+end
+```
+
+Signal JSON must be an object. Malformed/non-object input is a 400; oversized
+input is a 413. Raw bodies and GET/DELETE `datastar` JSON use the same byte
+limit before decoding. Configure `Plug.Parsers` with bounded `:length` and
+`:read_length` (at or below Dstar's limit); after parsing, the original byte
+size is unavailable. Page and Dispatch default to 1,000,000 bytes and accept
+`:max_signal_bytes`.
+
 ## Core API
 
 All functions in `Dstar` module:
@@ -152,7 +173,8 @@ All functions in `Dstar` module:
 
 ### Signals
 
-- **`Dstar.read_signals(conn)`** — Reads signals from request (GET: query, POST: body)
+- **`Dstar.fetch_signals(conn, opts \\ [])`** — Safely fetches object-only signals and returns the updated conn; `:max_bytes` bounds raw/query JSON
+- **`Dstar.read_signals(conn)`** — Map-only convenience for already-fetched body/query params
 - **`Dstar.patch_signals(conn, signals, opts \\ [])`** — Sends datastar-patch-signals event
   - Opts: `:only_if_missing`, `:event_id`, `:retry`
 
@@ -214,7 +236,9 @@ On GET/DELETE the token rides in the URL, so it lands in access logs and same-or
 
 **Router:**
 ```elixir
-post "/ds/:module/:event", Dstar.Plugs.Dispatch, modules: [MyApp.CounterHandler]
+post "/ds/:module/:event", Dstar.Plugs.Dispatch,
+  modules: [MyApp.CounterHandler],
+  max_signal_bytes: 1_000_000
 ```
 
 **Handler:**

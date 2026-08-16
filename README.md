@@ -268,9 +268,10 @@ Everything goes through the `Dstar` convenience module, which delegates to the l
 | Function | Does |
 |----------|------|
 | `start/1` | Open an SSE connection (`text/event-stream`, no-cache, chunked). |
-| `start_stream/2` | Open an SSE stream with per-tab dedup. Needs `Dstar.Utility.StreamRegistry`. |
+| `start_stream/2,3` | Open an SSE stream with per-tab dedup. Needs `Dstar.Utility.StreamRegistry`; arity 3 accepts signal-fetch options. |
 | `check_connection/1` | `{:ok, conn}` / `{:error, conn}` — is the client still there? |
-| `read_signals/1` | Read the request's Datastar signals as a map. |
+| `fetch_signals/1,2` | Safely fetch object-only signals and return `{:ok, signals, conn}` or an input error with the updated conn. |
+| `read_signals/1` | Read signals only when body/query params are already fetched. |
 | `patch_signals/2,3` | Patch signals on the client. |
 | `remove_signals/2,3` | Remove signals by dot-notated path (or list of paths). |
 | `nudge/2,3` | Tell tabs a collection changed, so each reloads with its own filters. |
@@ -282,6 +283,44 @@ Everything goes through the `Dstar` convenience module, which delegates to the l
 | `redirect/2,3` | Navigate the client. Same-origin path-absolute by default; off-origin `http`/`https` needs `external: true` or `allow:`. |
 | `console_log/2,3` | Log to the browser console. |
 | `post/1,2,3` `get/1,2,3` `put/1,2,3` `patch/1,2,3` `delete/1,2,3` | Build `@post(...)`-style action expressions for Datastar attributes. Arity 1 is the dynamic form (`Dstar.post("increment")`), which resolves and encodes the module client-side. |
+
+### Safe signal input
+
+Signal documents are JSON **objects**. Arrays, scalars, and `null` are rejected;
+malformed JSON is not treated as an empty object. Page routes and
+`Dstar.Plugs.Dispatch` return 400 for malformed/non-object input and 413 for an
+oversized payload, before SSE or an application handler starts. Their raw-input
+limit defaults to 1,000,000 bytes. Pages can set
+`use Dstar.Page, max_signal_bytes: ...`; Dispatch accepts the same plug option.
+
+Phoenix normally runs `Plug.Parsers` first, so controller actions can use
+`Dstar.read_signals/1` on the already-fetched map. Bound the parser too — Dstar
+cannot recover the original byte size after parsing:
+
+```elixir
+plug Plug.Parsers,
+  parsers: [:json],
+  json_decoder: Jason,
+  length: 1_000_000,
+  read_length: 1_000_000
+```
+
+A plain Plug that still owns the raw body must use the conn-returning API:
+
+```elixir
+case Dstar.fetch_signals(conn, max_bytes: 64_000) do
+  {:ok, signals, conn} ->
+    conn |> Dstar.start() |> Dstar.patch_signals(process(signals))
+
+  {:error, reason, conn} ->
+    Dstar.Signals.send_error(conn, reason) # 400, or 413 for :too_large
+end
+```
+
+Always thread the returned conn; `Plug.Conn.read_body/2` updates adapter/body
+state. GET and DELETE use the `datastar` query parameter and enforce the same
+configured byte limit before JSON decoding. Missing signals and an empty raw
+body mean `%{}`; an explicitly empty `datastar=` value is malformed.
 
 ### Safe action URL values
 
@@ -608,7 +647,7 @@ post "/counter/increment", CounterController, :increment
 ```
 
 ```elixir
-# controller
+# controller — Phoenix's Plug.Parsers already populated body_params
 def increment(conn, _params) do
   signals = Dstar.read_signals(conn)
   count = (signals["count"] || 0) + 1
@@ -717,7 +756,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.Router` | `dstar/2` (page routes), `dstar_components/2` (dispatch route) |
 | `Dstar.Test` | `sse_events/1`, `patched_signals/1`, `assert_patched_signals/2`, `assert_patched_element/2` |
 | `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2` |
-| `Dstar.Signals` | `read/1`, `patch/2,3`, `patch_raw/2,3`, `nudge/2,3`, `remove_signals/2,3`, `format_patch/1,2`, `format_remove/1,2` |
+| `Dstar.Signals` | `fetch/1,2`, `read/1`, `send_error/2`, `patch/2,3`, `patch_raw/2,3`, `nudge/2,3`, `remove_signals/2,3`, `format_patch/1,2`, `format_remove/1,2` |
 | `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `append/3,4`, `upsert/2,3`, `format_patch/1,2`, `format_remove/1,2` |
 | `Dstar.Actions` | `post/1,2,3`, `get/1,2,3`, `put/1,2,3`, `patch/1,2,3`, `delete/1,2,3`, `on_nudge/2`, `encode_module/1`, `decode_module/1` |
 | `Dstar.Scripts` | `execute/2,3`, `redirect/2,3`, `console_log/2,3` |

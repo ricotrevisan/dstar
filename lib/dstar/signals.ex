@@ -2,7 +2,7 @@ defmodule Dstar.Signals do
   @moduledoc """
   Functions for reading and patching Datastar signals via SSE.
 
-      signals = Dstar.Signals.read(conn)
+      {:ok, signals, conn} = Dstar.Signals.fetch(conn)
       conn |> patch(%{count: 42, message: "Hello"})
       conn |> patch(%{count: 42}, only_if_missing: true)
       conn |> remove_signals("user.session")
@@ -12,47 +12,116 @@ defmodule Dstar.Signals do
 
   @datastar_key "datastar"
   @event_type "datastar-patch-signals"
+  @default_max_bytes 1_000_000
   @default_only_if_missing false
   @nudge_key_format ~r/^[a-zA-Z0-9_]+$/
 
+  @typedoc "Why a signal payload could not be fetched"
+  @type fetch_error :: :malformed | :not_an_object | :too_large | {:read_body, term()}
+
+  @doc false
+  def default_max_bytes, do: @default_max_bytes
+
   @doc """
-  Reads signals from a Plug connection.
+  Safely fetches signals and returns the connection that owns the body state.
 
-  For GET and DELETE requests, reads from query parameters under the
-  "datastar" key. For other methods, reads from the JSON request body.
-  This matches Datastar v1.0's behavior, where GET and DELETE requests
-  do not carry a body.
+  Only JSON objects are accepted. GET and DELETE read the `datastar` query
+  parameter; other methods use already-fetched body params or read the raw
+  JSON body. Missing signals or an empty raw body produce an empty object;
+  an explicitly empty `datastar=` query value is malformed.
 
-  Returns a map of signals or an empty map if no signals are present.
+  Raw reads bound both `Plug.Conn.read_body/2`'s `:length` and
+  `:read_length`. The default maximum is #{@default_max_bytes} bytes and can
+  be changed per call with `:max_bytes`. When a parser already populated
+  `body_params`, that parser owns raw-body limits; configure it to the same
+  or a smaller limit.
 
-  ## Example
+  The returned conn must be threaded forward:
 
-      signals = Dstar.Signals.read(conn)
-      # => %{"count" => 10, "message" => "Hello"}
+      case Dstar.Signals.fetch(conn, max_bytes: 64_000) do
+        {:ok, signals, conn} -> handle(conn, signals)
+        {:error, reason, conn} -> Dstar.Signals.send_error(conn, reason)
+      end
 
+  ## Options
+
+  - `:max_bytes` — maximum raw JSON payload size (default #{@default_max_bytes})
+  """
+  @spec fetch(Plug.Conn.t(), keyword()) ::
+          {:ok, map(), Plug.Conn.t()} | {:error, fetch_error(), Plug.Conn.t()}
+  def fetch(conn, opts \\ []) do
+    max_bytes = max_bytes!(opts)
+
+    case conn do
+      %Plug.Conn{method: method} when method in ["GET", "DELETE"] ->
+        fetch_query_signals(conn, max_bytes)
+
+      %Plug.Conn{body_params: %Plug.Conn.Unfetched{}} ->
+        fetch_raw_body(conn, max_bytes)
+
+      %Plug.Conn{body_params: %{"_json" => _value} = body_params}
+      when map_size(body_params) == 1 ->
+        # Plug.Parsers wraps a non-object JSON document under this reserved
+        # key so it can merge params. Datastar never sends underscore-prefixed
+        # signals, so this exact shape cannot be a legitimate signal object.
+        {:error, :not_an_object, conn}
+
+      %Plug.Conn{body_params: body_params} when is_map(body_params) ->
+        {:ok, body_params, conn}
+
+      %Plug.Conn{} ->
+        {:error, :not_an_object, conn}
+    end
+  end
+
+  @doc """
+  Reads signals only when the relevant params have already been fetched.
+
+  This convenience API cannot safely own a raw request body because it cannot
+  return Plug's updated conn. Use `fetch/2` when `body_params` (or GET/DELETE
+  `query_params`) are unfetched. Invalid JSON and non-object JSON raise; code
+  that needs a controlled 400/413 response should use `fetch/2`.
   """
   @spec read(Plug.Conn.t()) :: map()
-  def read(%Plug.Conn{method: method, query_params: params})
+  def read(%Plug.Conn{method: method, query_params: %Plug.Conn.Unfetched{}})
       when method in ["GET", "DELETE"] do
-    case Map.get(params, @datastar_key) do
-      nil -> %{}
-      json_string -> decode_signals(json_string)
+    raise ArgumentError,
+          "query params are unfetched; use Dstar.Signals.fetch/2 and thread its returned conn"
+  end
+
+  def read(%Plug.Conn{method: method, query_params: params} = conn)
+      when method in ["GET", "DELETE"] do
+    case decode_query_signals(params, @default_max_bytes) do
+      {:ok, signals} -> signals
+      {:error, reason} -> raise ArgumentError, invalid_message(reason, conn)
     end
   end
+
+  def read(%Plug.Conn{body_params: %Plug.Conn.Unfetched{}}) do
+    raise ArgumentError,
+          "body params are unfetched; use Dstar.Signals.fetch/2 and thread its returned conn"
+  end
+
+  def read(%Plug.Conn{body_params: %{"_json" => _value} = body_params} = conn)
+      when map_size(body_params) == 1 do
+    raise ArgumentError, invalid_message(:not_an_object, conn)
+  end
+
+  def read(%Plug.Conn{body_params: body_params}) when is_map(body_params), do: body_params
 
   def read(%Plug.Conn{} = conn) do
-    case conn.body_params do
-      %Plug.Conn.Unfetched{} ->
-        {:ok, body, _conn} = Plug.Conn.read_body(conn)
-        decode_signals(body)
-
-      body_params when is_map(body_params) ->
-        body_params
-
-      _ ->
-        %{}
-    end
+    raise ArgumentError, invalid_message(:not_an_object, conn)
   end
+
+  @doc """
+  Sends a controlled plain-text response for a `fetch/2` error.
+
+  Oversized payloads receive 413; every other input failure receives 400.
+  This is safe to call before starting SSE.
+  """
+  @spec send_error(Plug.Conn.t(), fetch_error()) :: Plug.Conn.t()
+  def send_error(conn, :too_large), do: send_input_error(conn, 413, "Signal payload too large")
+  def send_error(conn, _reason), do: send_input_error(conn, 400, "Invalid signal payload")
 
   @doc """
   Patches signals on the client by sending an SSE event.
@@ -234,14 +303,105 @@ defmodule Dstar.Signals do
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
   end
 
-  defp decode_signals(""), do: %{}
-  defp decode_signals(nil), do: %{}
+  defp send_input_error(conn, status, body) do
+    conn
+    |> Plug.Conn.put_resp_content_type("text/plain")
+    |> Plug.Conn.send_resp(status, body)
+    |> Plug.Conn.halt()
+  end
 
-  defp decode_signals(json_string) when is_binary(json_string) do
-    case Jason.decode(json_string) do
-      {:ok, map} -> map
-      {:error, _} -> %{}
+  defp fetch_query_signals(conn, max_bytes) do
+    conn = Plug.Conn.fetch_query_params(conn)
+
+    case decode_query_signals(conn.query_params, max_bytes) do
+      {:ok, signals} -> {:ok, signals, conn}
+      {:error, reason} -> {:error, reason, conn}
     end
+  end
+
+  defp decode_query_signals(params, max_bytes) do
+    case Map.fetch(params, @datastar_key) do
+      :error -> {:ok, %{}}
+      {:ok, ""} -> {:error, :malformed}
+      {:ok, json} -> decode_payload(json, max_bytes)
+    end
+  end
+
+  defp fetch_raw_body(conn, max_bytes) do
+    read_raw_body(conn, max_bytes, max_bytes, [])
+  end
+
+  defp read_raw_body(conn, max_bytes, remaining, chunks) do
+    read_opts = [length: remaining, read_length: remaining]
+
+    case Plug.Conn.read_body(conn, read_opts) do
+      {:ok, chunk, conn} ->
+        if byte_size(chunk) > remaining do
+          {:error, :too_large, conn}
+        else
+          decode_raw_body([chunks, chunk], conn, max_bytes)
+        end
+
+      {:more, "", conn} ->
+        {:error, {:read_body, :no_progress}, conn}
+
+      {:more, chunk, conn} ->
+        chunk_size = byte_size(chunk)
+
+        if chunk_size >= remaining do
+          {:error, :too_large, conn}
+        else
+          read_raw_body(conn, max_bytes, remaining - chunk_size, [chunks, chunk])
+        end
+
+      {:error, reason} ->
+        {:error, {:read_body, reason}, conn}
+    end
+  end
+
+  defp decode_raw_body(chunks, conn, max_bytes) do
+    result =
+      case IO.iodata_to_binary(chunks) do
+        "" -> {:ok, %{}}
+        body -> decode_payload(body, max_bytes)
+      end
+
+    case result do
+      {:ok, signals} -> {:ok, signals, %{conn | body_params: signals}}
+      {:error, reason} -> {:error, reason, conn}
+    end
+  end
+
+  defp decode_payload(nil, _max_bytes), do: {:error, :not_an_object}
+  defp decode_payload("", _max_bytes), do: {:error, :malformed}
+
+  defp decode_payload(json, max_bytes) when is_binary(json) do
+    if byte_size(json) > max_bytes do
+      {:error, :too_large}
+    else
+      case Jason.decode(json) do
+        {:ok, signals} when is_map(signals) -> {:ok, signals}
+        {:ok, _json} -> {:error, :not_an_object}
+        {:error, _reason} -> {:error, :malformed}
+      end
+    end
+  end
+
+  defp decode_payload(_payload, _max_bytes), do: {:error, :not_an_object}
+
+  defp max_bytes!(opts) do
+    case Keyword.get(opts, :max_bytes, @default_max_bytes) do
+      max_bytes when is_integer(max_bytes) and max_bytes > 0 ->
+        max_bytes
+
+      value ->
+        raise ArgumentError, ":max_bytes must be a positive integer, got: #{inspect(value)}"
+    end
+  end
+
+  defp invalid_message(reason, conn) do
+    "invalid signal payload (#{inspect(reason)}) for #{conn.method}; " <>
+      "use Dstar.Signals.fetch/2 for a controlled error response"
   end
 
   defp maybe_add_only_if_missing(lines, false), do: lines

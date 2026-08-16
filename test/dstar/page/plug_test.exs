@@ -136,6 +136,22 @@ defmodule Dstar.Page.PlugTest do
     end
   end
 
+  defmodule SmallPayloadPage do
+    use Dstar.Page, max_signal_bytes: 8
+
+    def render(assigns), do: ~H'<div id="small">small</div>'
+
+    def handle_event(conn, "test", _signals) do
+      send(:dstar_plug_input_test, :handle_event_ran)
+      conn
+    end
+
+    def handle_connect(conn, _params) do
+      send(:dstar_plug_input_test, :handle_connect_ran)
+      conn
+    end
+  end
+
   defmodule AuthStreamPage do
     use Dstar.Page, idle_check: 50
 
@@ -164,6 +180,58 @@ defmodule Dstar.Page.PlugTest do
     end
 
     def handle_info(:halt_now, conn), do: {:halt, conn}
+  end
+
+  describe "safe signal fetching (#29)" do
+    setup do
+      Process.register(self(), :dstar_plug_input_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_input_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "malformed and non-object event payloads return 400 before SSE" do
+      for body <- ["{", "[]", "null"] do
+        conn =
+          conn(:post, "/small/_event/test", body)
+          |> Map.put(:path_params, %{"event" => "test"})
+          |> PagePlug.call(PagePlug.init({:event, SmallPayloadPage}))
+
+        assert conn.status == 400
+        assert conn.state == :sent
+        assert conn.resp_body == "Invalid signal payload"
+        refute_received :handle_event_ran
+      end
+    end
+
+    test "oversized event payloads return 413 before SSE" do
+      conn =
+        conn(:post, "/small/_event/test", ~s({"long":true}))
+        |> Map.put(:path_params, %{"event" => "test"})
+        |> PagePlug.call(PagePlug.init({:event, SmallPayloadPage}))
+
+      assert conn.status == 413
+      assert conn.state == :sent
+      assert conn.resp_body == "Signal payload too large"
+      refute_received :handle_event_ran
+    end
+
+    test "invalid stream payloads return before handle_connect" do
+      conn =
+        conn(:post, "/small", "[]")
+        |> PagePlug.call(PagePlug.init({:stream, SmallPayloadPage}))
+
+      assert conn.status == 400
+      assert conn.state == :sent
+      refute_received :handle_connect_ran
+    end
   end
 
   describe "authorize/2 before SSE (#28)" do
@@ -295,6 +363,17 @@ defmodule Dstar.Page.PlugTest do
       assert conn.status == 200
       assert_patched_signals(conn, %{count: 3})
       assert_patched_element(conn, "#history")
+    end
+
+    test "reads a raw object and passes the adapter-updated conn to the handler" do
+      conn =
+        conn(:post, "/counter/_event/increment", ~s({"count":2}))
+        |> Map.put(:path_params, %{"event" => "increment"})
+        |> PagePlug.call(PagePlug.init({:event, CounterPage}))
+
+      assert conn.state == :chunked
+      assert conn.body_params == %{"count" => 2}
+      assert_patched_signals(conn, %{count: 3})
     end
 
     test "handlers never call Dstar.start themselves" do

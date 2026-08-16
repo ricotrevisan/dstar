@@ -129,6 +129,48 @@ defmodule Dstar.Plugs.DispatchTest do
       assert result.status == 200
     end
 
+    test "reads a raw JSON object and threads the conn into the handler", %{opts: opts} do
+      module_name = Dstar.Actions.encode_module(TestChatHandler)
+
+      result =
+        conn(:post, "/ds/#{module_name}/send_message", ~s({"message":"raw"}))
+        |> Map.put(:path_params, %{"module" => module_name, "event" => "send_message"})
+        |> Dispatch.call(opts)
+
+      assert result.state == :chunked
+      assert Dstar.Test.patched_signals(result)["message"] == "raw"
+      assert result.body_params == %{"message" => "raw"}
+    end
+
+    test "returns 400 for malformed or non-object signals before the handler", %{opts: opts} do
+      module_name = Dstar.Actions.encode_module(TestCounterHandler)
+
+      for body <- ["{", "[]", "null"] do
+        result =
+          conn(:post, "/ds/#{module_name}/increment", body)
+          |> Map.put(:path_params, %{"module" => module_name, "event" => "increment"})
+          |> Dispatch.call(opts)
+
+        assert result.status == 400
+        assert result.state == :sent
+        assert result.resp_body == "Invalid signal payload"
+      end
+    end
+
+    test "returns 413 when signals exceed the configured limit" do
+      module_name = Dstar.Actions.encode_module(TestCounterHandler)
+      opts = Dispatch.init(modules: [TestCounterHandler], max_signal_bytes: 8)
+
+      result =
+        conn(:post, "/ds/#{module_name}/increment", ~s({"count":100}))
+        |> Map.put(:path_params, %{"module" => module_name, "event" => "increment"})
+        |> Dispatch.call(opts)
+
+      assert result.status == 413
+      assert result.state == :sent
+      assert result.resp_body == "Signal payload too large"
+    end
+
     test "handles different events on same handler", %{opts: opts} do
       module_name = Dstar.Actions.encode_module(TestCounterHandler)
 

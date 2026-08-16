@@ -27,6 +27,13 @@ defmodule Dstar.Plugs.Dispatch do
   ## Options
 
   - `:modules` — Required. List of allowed handler modules.
+  - `:max_signal_bytes` — Maximum raw signal JSON size (default `1_000_000`).
+    If `Plug.Parsers` runs first, configure its `:length` and `:read_length`
+    to the same or a smaller value.
+
+  Malformed and non-object signal payloads receive 400, and oversized raw
+  payloads receive 413. Dispatch returns those responses before calling the
+  handler, so an SSE response has not yet started.
 
   """
 
@@ -47,11 +54,14 @@ defmodule Dstar.Plugs.Dispatch do
         {Actions.encode_module(mod), mod}
       end)
 
-    %{lookup: lookup}
+    %{
+      lookup: lookup,
+      max_signal_bytes: Keyword.get(opts, :max_signal_bytes, Dstar.Signals.default_max_bytes())
+    }
   end
 
   @impl Plug
-  def call(conn, %{lookup: lookup}) do
+  def call(conn, %{lookup: lookup, max_signal_bytes: max_signal_bytes}) do
     conn = fetch_query_params(conn)
 
     module_param = conn.path_params["module"] || conn.params["module"]
@@ -59,18 +69,9 @@ defmodule Dstar.Plugs.Dispatch do
 
     case Map.fetch(lookup, module_param) do
       {:ok, module} ->
-        signals = Signals.read(conn)
-
-        try do
-          module.handle_event(conn, event, signals)
-        rescue
-          exception ->
-            Logger.error(
-              "Dstar.Plugs.Dispatch: #{inspect(module)}.handle_event(#{inspect(event)}) raised:\n" <>
-                Exception.format(:error, exception, __STACKTRACE__)
-            )
-
-            reraise exception, __STACKTRACE__
+        case Signals.fetch(conn, max_bytes: max_signal_bytes) do
+          {:ok, signals, conn} -> dispatch(conn, module, event, signals)
+          {:error, reason, conn} -> Signals.send_error(conn, reason)
         end
 
       :error ->
@@ -78,5 +79,17 @@ defmodule Dstar.Plugs.Dispatch do
         |> put_resp_content_type("text/plain")
         |> send_resp(404, "Not found")
     end
+  end
+
+  defp dispatch(conn, module, event, signals) do
+    module.handle_event(conn, event, signals)
+  rescue
+    exception ->
+      Logger.error(
+        "Dstar.Plugs.Dispatch: #{inspect(module)}.handle_event(#{inspect(event)}) raised:\n" <>
+          Exception.format(:error, exception, __STACKTRACE__)
+      )
+
+      reraise exception, __STACKTRACE__
   end
 end

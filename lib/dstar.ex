@@ -43,7 +43,8 @@ defmodule Dstar do
 
   Requires `Dstar.Utility.StreamRegistry` in your supervision tree
   and a `tabId` signal in your root layout. See
-  `Dstar.Utility.StreamRegistry` module docs for setup.
+  `Dstar.Utility.StreamRegistry` module docs for setup. Pass `max_bytes: n`
+  as a third argument to bound raw/query signal input per call.
 
   ## Example
 
@@ -51,6 +52,7 @@ defmodule Dstar do
 
   """
   defdelegate start_stream(conn, scope_key), to: Dstar.Utility.StreamRegistry
+  defdelegate start_stream(conn, scope_key, opts), to: Dstar.Utility.StreamRegistry
 
   @doc """
   Checks if an SSE connection is still open.
@@ -69,15 +71,24 @@ defmodule Dstar do
   defdelegate check_connection(conn), to: Dstar.SSE
 
   @doc """
-  Reads Datastar signals from the request.
+  Safely fetches Datastar signals and returns the updated Plug conn.
 
-  For GET requests, reads from query params. For POST/PUT/etc, reads from the JSON body.
+  Use this for plain Plug conns whose body has not already been parsed. It
+  accepts JSON objects only and bounds raw/query payloads with `:max_bytes`.
 
-  ## Example
+      case Dstar.fetch_signals(conn, max_bytes: 64_000) do
+        {:ok, signals, conn} -> handle(conn, signals)
+        {:error, reason, conn} -> Dstar.Signals.send_error(conn, reason)
+      end
+  """
+  def fetch_signals(conn, opts \\ []), do: Dstar.Signals.fetch(conn, opts)
 
-      signals = Dstar.read_signals(conn)
-      count = signals["count"] || 0
+  @doc """
+  Reads already-fetched Datastar signals as a map.
 
+  `Plug.Parsers`/Phoenix body params and already-fetched GET/DELETE query
+  params work here. For an unfetched raw body, use `fetch_signals/2`; this
+  convenience function cannot return the adapter-updated conn.
   """
   defdelegate read_signals(conn), to: Dstar.Signals, as: :read
 

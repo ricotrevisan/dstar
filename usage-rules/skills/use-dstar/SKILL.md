@@ -25,12 +25,33 @@ def handle_event(conn, _params) do
 end
 ```
 
+Use that map-only reader only after Phoenix/`Plug.Parsers` fetched params.
+For a raw body, preserve Plug's updated conn:
+
+```elixir
+case Dstar.fetch_signals(conn, max_bytes: 64_000) do
+  {:ok, signals, conn} ->
+    conn |> Dstar.start() |> Dstar.patch_signals(process(signals))
+
+  {:error, reason, conn} ->
+    Dstar.Signals.send_error(conn, reason)
+end
+```
+
+Accept signal JSON objects only. Missing signals/empty raw bodies are `%{}`;
+malformed/non-object payloads are 400 and oversized payloads are 413. The same
+limit applies to GET/DELETE `datastar` JSON before decoding. If `Plug.Parsers`
+runs first, bound both its `:length` and `:read_length` at or below Dstar's
+limit because the original size is unavailable after parsing. Page and
+Dispatch use `:max_signal_bytes` (default 1,000,000).
+
 ## API Reference
 
 ### Connection & Signals
 
 - `Dstar.start(conn)` — Open SSE (chunked, text/event-stream)
-- `Dstar.read_signals(conn)` — Read signals from GET query or POST body
+- `Dstar.fetch_signals(conn, max_bytes: limit)` — Safe raw/query fetch; returns signals plus updated conn or an input error
+- `Dstar.read_signals(conn)` — Map-only reader for already-fetched body/query params
 - `Dstar.patch_signals(conn, %{key: value}, opts)` — Send signal updates
   - `only_if_missing: true` — Only set if client doesn't have key
   - `event_id: "123"`, `retry: 5000`
@@ -248,7 +269,8 @@ On GET/DELETE the token rides in the URL, so it lands in access logs and same-or
 **Router:**
 ```elixir
 post "/ds/:module/:event", Dstar.Plugs.Dispatch,
-  modules: [MyApp.CounterHandler, MyApp.TodoHandler]
+  modules: [MyApp.CounterHandler, MyApp.TodoHandler],
+  max_signal_bytes: 1_000_000
 ```
 
 **Handler Module:**

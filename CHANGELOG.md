@@ -4,8 +4,24 @@
 
 ### Security
 
+- **Signal fetching is now bounded, object-only, and conn-safe (#29).**
+  `Dstar.Signals.fetch/2` (also `Dstar.fetch_signals/2`) returns the parsed
+  signal map together with Plug's updated conn, accepts JSON objects only,
+  distinguishes malformed/non-object input from missing signals, and bounds
+  both raw-body read sizes plus GET/DELETE `datastar` JSON before decoding.
+  The default limit is 1,000,000 bytes and is configurable per call; Page and
+  Dispatch expose `:max_signal_bytes`.
+
+  Page events/streams, component Dispatch, and `StreamRegistry.start_stream/2`
+  use the safe path. Malformed/non-object input receives 400 and oversized
+  input receives 413 before SSE, handlers, or registry claims start. The
+  map-only `read_signals/1` convenience remains for already-fetched
+  Phoenix/Plug params; plain Plug consumers must use `fetch_signals/2` and
+  thread its conn. Applications whose `Plug.Parsers` runs first must bound
+  that parser's `:length` and `:read_length` too.
+
 - **Pages can reject event and stream POSTs with a normal 401/403
-  before SSE starts (#28).** Optional `Dstar.Page.authorize/2` runs
+  before SSE starts (#28).** Optional `authorize/2` runs
   after signals are read and before `Dstar.SSE.start/1` /
   `start_stream/2`. A halted or already-staged response is returned as
   ordinary HTTP — no chunked 200, no `handle_event/3` /
