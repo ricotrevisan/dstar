@@ -100,6 +100,185 @@ defmodule Dstar.Page.PlugTest do
     def handle_info(:halt_now, conn), do: {:halt, conn}
   end
 
+  defmodule AuthEventPage do
+    use Dstar.Page
+
+    def render(assigns), do: ~H'<div id="a">auth event</div>'
+
+    def authorize(conn, {:event, "secret"}) do
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+    end
+
+    def authorize(conn, {:event, "silent"}) do
+      conn
+      |> Plug.Conn.put_resp_header("x-denied", "1")
+      |> Plug.Conn.send_resp(401, "Unauthorized")
+    end
+
+    def authorize(conn, {:event, _event}) do
+      assign(conn, :from_authorize, true)
+    end
+
+    def handle_event(conn, "secret", _signals) do
+      send(:dstar_plug_auth_test, :handle_event_ran)
+      patch_signals(conn, %{leaked: true})
+    end
+
+    def handle_event(conn, "silent", _signals) do
+      send(:dstar_plug_auth_test, :handle_event_ran)
+      patch_signals(conn, %{leaked: true})
+    end
+
+    def handle_event(conn, "increment", _signals) do
+      patch_signals(conn, %{ok: true, from_authorize: conn.assigns.from_authorize})
+    end
+  end
+
+  defmodule AuthStreamPage do
+    use Dstar.Page, idle_check: 50
+
+    def render(assigns), do: ~H'<div id="as">auth stream</div>'
+
+    def authorize(conn, {:stream, _params}) do
+      case conn.assigns[:current_user] do
+        nil ->
+          conn
+          |> Plug.Conn.send_resp(401, "Unauthorized")
+          |> Plug.Conn.halt()
+
+        user ->
+          assign(conn, :scope_user, user)
+      end
+    end
+
+    def stream_key(conn) do
+      send(:dstar_plug_stream_test, {:stream_key, conn.assigns.scope_user})
+      {:auth_scope, conn.assigns.scope_user}
+    end
+
+    def handle_connect(conn, _params) do
+      send(:dstar_plug_stream_test, {:connected, self(), conn.assigns.scope_user})
+      conn
+    end
+
+    def handle_info(:halt_now, conn), do: {:halt, conn}
+  end
+
+  describe "authorize/2 before SSE (#28)" do
+    alias Dstar.Utility.StreamRegistry
+
+    test "rejects an event POST with 403 without starting SSE or calling handle_event" do
+      Process.register(self(), :dstar_plug_auth_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_auth_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      conn = event_conn("secret", %{})
+      conn = PagePlug.call(conn, PagePlug.init({:event, AuthEventPage}))
+
+      assert conn.status == 403
+      assert conn.state == :sent
+      assert conn.resp_body == "Forbidden"
+      refute_received :handle_event_ran
+    end
+
+    test "send_resp without halt still skips SSE" do
+      Process.register(self(), :dstar_plug_auth_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_auth_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      conn = event_conn("silent", %{})
+      conn = PagePlug.call(conn, PagePlug.init({:event, AuthEventPage}))
+
+      assert conn.status == 401
+      assert conn.state == :sent
+      refute_received :handle_event_ran
+    end
+
+    test "authorized event POSTs keep authorize/2 assigns and start SSE" do
+      # Direct POST — no preceding GET / mount/2.
+      conn = event_conn("increment", %{})
+      conn = PagePlug.call(conn, PagePlug.init({:event, AuthEventPage}))
+
+      assert conn.state == :chunked
+      assert conn.status == 200
+      assert_patched_signals(conn, %{ok: true, from_authorize: true})
+    end
+
+    test "rejects a stream POST with 401 before stream_key, register, or handle_connect" do
+      Process.register(self(), :dstar_plug_stream_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_stream_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      conn =
+        conn(:post, "/stream")
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Map.put(:body_params, %{"tabId" => "tab-denied"})
+
+      conn = PagePlug.call(conn, PagePlug.init({:stream, AuthStreamPage}))
+
+      assert conn.status == 401
+      assert conn.state == :sent
+      assert conn.resp_body == "Unauthorized"
+      refute_received {:stream_key, _}
+      refute_received {:connected, _, _}
+      assert Registry.lookup(StreamRegistry, {{:auth_scope, :alice}, "tab-denied"}) == []
+    end
+
+    test "authorized stream POSTs keep authorize/2 assigns for stream_key and handle_connect" do
+      Process.register(self(), :dstar_plug_stream_test)
+
+      on_exit(fn ->
+        try do
+          Process.unregister(:dstar_plug_stream_test)
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      # Direct POST — no preceding GET / mount/2.
+      conn =
+        conn(:post, "/stream")
+        |> Plug.Conn.assign(:current_user, :alice)
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> Map.put(:body_params, %{"tabId" => "tab-ok"})
+
+      task =
+        Task.async(fn ->
+          PagePlug.call(conn, PagePlug.init({:stream, AuthStreamPage}))
+        end)
+
+      assert_receive {:stream_key, :alice}, 1_000
+      assert_receive {:connected, stream_pid, :alice}, 1_000
+
+      assert [{^stream_pid, _}] =
+               Registry.lookup(StreamRegistry, {{:auth_scope, :alice}, "tab-ok"})
+
+      send(stream_pid, :halt_now)
+      conn = Task.await(task, 2_000)
+      assert conn.state == :chunked
+    end
+  end
+
   describe "event action (POST _event/:event)" do
     defp event_conn(event, signals) do
       conn(:post, "/counter/_event/#{event}")

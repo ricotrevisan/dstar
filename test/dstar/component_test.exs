@@ -14,6 +14,12 @@ defmodule Dstar.ComponentTest do
       """
     end
 
+    def handle_event(conn, "change_title:" <> "forbidden", _signals) do
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+    end
+
     def handle_event(conn, "change_title:" <> _id, signals) do
       conn
       |> start()
@@ -77,5 +83,21 @@ defmodule Dstar.ComponentTest do
     conn = Dstar.Plugs.Dispatch.call(conn, opts)
     assert conn.state == :chunked
     assert_patched_signals(conn, %{saved: true, title: "New"})
+  end
+
+  test "a component can reject with 403 before start/1" do
+    encoded = Dstar.Actions.encode_module(DetailDrawer)
+    opts = Dstar.Plugs.Dispatch.init(modules: [DetailDrawer])
+
+    conn =
+      conn(:post, "/ds/#{encoded}/change_title:forbidden")
+      |> Map.put(:path_params, %{"module" => encoded, "event" => "change_title:forbidden"})
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Map.put(:body_params, %{"title" => "Nope"})
+
+    conn = Dstar.Plugs.Dispatch.call(conn, opts)
+    assert conn.status == 403
+    assert conn.state == :sent
+    assert conn.resp_body == "Forbidden"
   end
 end

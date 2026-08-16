@@ -12,16 +12,24 @@ defmodule Dstar.Router do
         dstar_components "/ds", [DetailDrawer, DatePicker]
       end
 
-  `dstar/2` expands to plain Phoenix routes — the route is the allowlist:
+  `dstar/2` expands to plain Phoenix routes — the route is the *code*
+  allowlist, not an authorization check:
 
       GET   /counter                 -> Dstar.Page.Plug page    (mount + render)
-      POST  /counter                 -> Dstar.Page.Plug stream  (handle_connect + loop)
-      POST  /counter/_event/:event   -> Dstar.Page.Plug event   (handle_event)
+      POST  /counter                 -> Dstar.Page.Plug stream  (authorize + handle_connect + loop)
+      POST  /counter/_event/:event   -> Dstar.Page.Plug event   (authorize + handle_event)
+
+  All three go through the surrounding `pipe_through`. Use the pipeline
+  for session-wide authentication. `mount/2` authorizes only the GET;
+  page-local `authorize/2` is the pre-SSE seam for event and stream
+  POSTs. See `Dstar.Page`.
 
   `_event` is a reserved path segment under page paths.
 
   `dstar_components/2` expands to one POST route on `Dstar.Plugs.Dispatch`
-  with the given module allowlist.
+  with the given module allowlist. That allowlist selects handler
+  modules; the handler must still authorize the current user before
+  `Dstar.start/1` if it needs a normal 401/403.
   """
 
   @doc """

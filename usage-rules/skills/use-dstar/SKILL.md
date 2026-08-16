@@ -199,6 +199,48 @@ The plug writes `body_params["_csrf_token"]` only when that key is missing, in t
 
 Cookie-authenticated state-changing routes need a real CSRF defense — normally this plug plus `:protect_from_forgery`, or an `x-csrf-token` header (strongest hygiene: the token never lands in a URL), or a deliberately implemented Origin / Fetch-Metadata policy. Session/auth checks and SameSite cookies identify the victim; they do not prove who initiated the request.
 
+## Page authorization
+
+`dstar/2` registers GET, event POST, and stream POST as independent routes.
+Put session-wide authentication on the surrounding `pipe_through` so it
+covers all three plus `dstar_components/2`.
+
+`mount/2` runs only on the GET. It does not protect a direct event or
+stream POST, and those callbacks run *after* SSE has started (status 200).
+Use optional `authorize/2` for page/resource checks **before** SSE:
+
+```elixir
+def authorize(conn, {:event, "change_title:" <> id}) do
+  case Items.fetch_for_user(conn.assigns.current_user, id) do
+    {:ok, item} -> assign(conn, :item, item)
+    :error ->
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+  end
+end
+
+def authorize(conn, {:event, _event}), do: conn
+
+def authorize(conn, {:stream, _params}) do
+  if conn.assigns[:current_user] do
+    conn
+  else
+    conn
+    |> Plug.Conn.send_resp(401, "Unauthorized")
+    |> Plug.Conn.halt()
+  end
+end
+```
+
+The route and the component-module list are *code* allowlists, not
+authorization. Interpolating a record id into the event name is fine;
+still prove the current user may touch that id. Component handlers call
+`start/1` themselves — authorize before that call if you need a normal
+401/403.
+
+Session/auth checks are not a CSRF substitute; see CSRF Setup above.
+
 On GET/DELETE the token rides in the URL, so it lands in access logs and same-origin `Referer` headers. Validation is unaffected, but redact the entire `datastar` query value from logs/APM and set `Referrer-Policy` to `no-referrer` or `origin` (`same-origin` still sends path/query on same-origin requests).
 
 ## Dynamic Dispatch

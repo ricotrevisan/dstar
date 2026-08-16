@@ -239,6 +239,66 @@ Raw `event(..., opts: "...")` and `connect(opts: "...")` values are executable
 JavaScript for trusted developer configuration only. Never interpolate request,
 stored, or user data into `:opts`.
 
+## Page authorization
+
+Session-wide authentication belongs on the router pipeline so it covers
+GET, event POST, stream POST, and component dispatch. `mount/2` authorizes
+only the GET. Use `authorize/2` for page/resource checks before SSE starts.
+
+**Router:**
+```elixir
+scope "/", MyAppWeb do
+  pipe_through [:browser, :require_authenticated_user]
+
+  dstar "/items", ItemPage
+  dstar_components "/ds", [DetailDrawer]
+end
+```
+
+**Page:**
+```elixir
+def authorize(conn, {:event, "change_title:" <> id}) do
+  case Items.fetch_for_user(conn.assigns.current_user, id) do
+    {:ok, item} -> assign(conn, :item, item)
+    :error ->
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+  end
+end
+
+def authorize(conn, {:event, _event}), do: conn
+
+def authorize(conn, {:stream, _params}) do
+  if conn.assigns[:current_user] do
+    conn
+  else
+    conn
+    |> Plug.Conn.send_resp(401, "Unauthorized")
+    |> Plug.Conn.halt()
+  end
+end
+```
+
+**Component handler** (Dispatch does not start SSE — authorize before `start/1`):
+```elixir
+def handle_event(conn, "change_title:" <> id, signals) do
+  case Items.fetch_for_user(conn.assigns.current_user, id) do
+    {:ok, item} ->
+      {:ok, _} = Items.update_title(item, signals["title"])
+      conn |> Dstar.start() |> Dstar.patch_signals(%{saved: true})
+
+    :error ->
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+  end
+end
+```
+
+The route and the component-module list select code. They do not prove
+the current user may touch the record id in the event name.
+
 ## CSRF Setup
 
 Phoenix expects the CSRF token in the `_csrf_token` body param — and Datastar can't deliver that: its `_`-prefixed signal keys are front-end-only and never sent to the backend. So the token travels as a non-prefixed signal, and one plug copies it into place.

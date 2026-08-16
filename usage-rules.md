@@ -65,8 +65,61 @@ Key rules:
   threading needed for path params. The name is encoded as one literal route
   segment; empty, `.` and `..` names are rejected.
 - The library calls `Dstar.start/1` before `handle_event/3` — do not call it
-  again inside the handler.
-- `dstar "/path", PageModule` is the allowlist. No separate allowlist entry needed.
+  again inside the handler. Optional `authorize/2` runs *before* that start
+  and can return a normal 401/403.
+- `dstar "/path", PageModule` is the *code* allowlist. It does not authorize
+  the current user. `mount/2` runs only on GET; put session auth on the
+  router pipeline and page/resource checks in `authorize/2`.
+
+## Authorization
+
+`dstar/2` registers three independent routes (GET render, POST stream,
+POST `_event/:event`). Pipe them through the same authenticated pipeline
+as the rest of the app — that covers GET, events, streams, and
+`dstar_components/2`.
+
+`mount/2` authorizes only its GET. A check performed only there does not
+protect a direct event or stream POST, and those callbacks cannot return
+a normal 401/403 once SSE has started.
+
+```elixir
+# router.ex
+scope "/", MyAppWeb do
+  pipe_through [:browser, :require_authenticated_user]
+
+  dstar "/items", ItemPage
+  dstar_components "/ds", [DetailDrawer]
+end
+```
+
+```elixir
+# page-local / resource-specific
+def authorize(conn, {:event, "change_title:" <> id}) do
+  case Items.fetch_for_user(conn.assigns.current_user, id) do
+    {:ok, item} -> assign(conn, :item, item)
+    :error ->
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+  end
+end
+
+def authorize(conn, {:event, _event}), do: conn
+
+def authorize(conn, {:stream, _params}) do
+  if conn.assigns[:current_user] do
+    conn
+  else
+    conn
+    |> Plug.Conn.send_resp(401, "Unauthorized")
+    |> Plug.Conn.halt()
+  end
+end
+```
+
+Component handlers call `start/1` themselves. Authorize the record
+*before* that call if you need a normal 401/403 — interpolating an id
+into the event name is not an authorization check.
 
 ## What Dstar Is
 

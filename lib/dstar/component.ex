@@ -15,8 +15,19 @@ defmodule Dstar.Component do
         end
 
         def handle_event(conn, "change_title:" <> id, signals) do
-          # ... update, then patch
-          conn |> start() |> patch_signals(%{saved: true})
+          # The module allowlist only selects this handler. Authorize
+          # the record *before* start/1 — after that the response is
+          # already a 200 SSE stream.
+          case Items.fetch_for_user(conn.assigns.current_user, id) do
+            {:ok, item} ->
+              {:ok, _} = Items.update_title(item, signals["title"])
+              conn |> start() |> patch_signals(%{saved: true})
+
+            :error ->
+              conn
+              |> Plug.Conn.send_resp(403, "Forbidden")
+              |> Plug.Conn.halt()
+          end
         end
       end
 

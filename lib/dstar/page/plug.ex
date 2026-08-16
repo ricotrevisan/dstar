@@ -5,11 +5,15 @@ if Code.ensure_loaded?(Phoenix.Controller) do
 
     - `{:page, Module}` — GET: `mount/2` then `render/1` through Phoenix's
       view pipeline (root layout, flash, `page_title` all apply).
-    - `{:event, Module}` — POST `_event/:event`: reads signals, starts SSE,
-      calls `handle_event/3`.
-    - `{:stream, Module}` — POST: starts SSE (deduped when `stream_key/1`
-      is defined), calls `handle_connect/2`, then owns the receive loop
-      dispatching to `handle_info/2`.
+    - `{:event, Module}` — POST `_event/:event`: reads signals, optional
+      `authorize/2`, starts SSE, calls `handle_event/3`.
+    - `{:stream, Module}` — POST: optional `authorize/2`, starts SSE
+      (deduped when `stream_key/1` is defined), calls `handle_connect/2`,
+      then owns the receive loop dispatching to `handle_info/2`.
+
+    `authorize/2` is the pre-SSE seam: a halted or already-staged
+    response is returned as ordinary HTTP and SSE never starts.
+    `mount/2` does not run on event or stream POSTs.
 
     All control flow lives here as plain functions — pages contain only
     callbacks.
@@ -45,7 +49,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
       # Skip render if mount halted OR staged/sent any response. A :set conn
       # (resp/3 without send_resp) must be honored, not overwritten: Plug
       # adapters auto-send staged responses (see Plug.Cowboy.Handler.maybe_send/2).
-      if conn.halted or conn.state != :unset do
+      if response_committed?(conn) do
         conn
       else
         conn
@@ -62,7 +66,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
       end
     end
 
-    # ── POST _event/:event: read signals, start SSE, handle_event ───────
+    # ── POST _event/:event: read signals, authorize, start SSE, handle_event
 
     defp event(conn, page) do
       conn = fetch_query_params(conn)
@@ -75,8 +79,17 @@ if Code.ensure_loaded?(Phoenix.Controller) do
           )
 
       signals = Dstar.Signals.read(conn)
-      conn = Dstar.SSE.start(conn)
+      conn = maybe_authorize(conn, page, {:event, event})
 
+      if response_committed?(conn) do
+        conn
+      else
+        conn = Dstar.SSE.start(conn)
+        dispatch_event(conn, page, event, signals)
+      end
+    end
+
+    defp dispatch_event(conn, page, event, signals) do
       if Application.get_env(:dstar, :debug_errors, false) do
         try do
           page.handle_event(conn, event, signals)
@@ -108,31 +121,40 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     defp stream(conn, page) do
       if exported?(page, :handle_connect, 2) do
         conn = fetch_query_params(conn)
+        conn = maybe_authorize(conn, page, {:stream, conn.params})
 
-        conn =
-          if function_exported?(page, :stream_key, 1) do
-            Dstar.start_stream(conn, page.stream_key(conn))
-          else
-            Dstar.SSE.start(conn)
-          end
-
-        drain_stale_replaced()
-
-        conn =
-          try do
-            page.handle_connect(conn, conn.params)
-          rescue
-            exception ->
-              log_crash(page, :handle_connect, exception, __STACKTRACE__)
-              reraise exception, __STACKTRACE__
-          end
-
-        loop(conn, page, page.__dstar__(:idle_check))
+        if response_committed?(conn) do
+          conn
+        else
+          open_stream(conn, page)
+        end
       else
         conn
         |> put_resp_content_type("text/plain")
         |> send_resp(404, "Not found")
       end
+    end
+
+    defp open_stream(conn, page) do
+      conn =
+        if function_exported?(page, :stream_key, 1) do
+          Dstar.start_stream(conn, page.stream_key(conn))
+        else
+          Dstar.SSE.start(conn)
+        end
+
+      drain_stale_replaced()
+
+      conn =
+        try do
+          page.handle_connect(conn, conn.params)
+        rescue
+          exception ->
+            log_crash(page, :handle_connect, exception, __STACKTRACE__)
+            reraise exception, __STACKTRACE__
+        end
+
+      loop(conn, page, page.__dstar__(:idle_check))
     end
 
     defp loop(conn, page, idle_check) do
@@ -229,6 +251,19 @@ if Code.ensure_loaded?(Phoenix.Controller) do
 
       conn
     end
+
+    defp maybe_authorize(conn, page, action) do
+      if exported?(page, :authorize, 2) do
+        page.authorize(conn, action)
+      else
+        conn
+      end
+    end
+
+    # mount/2 and authorize/2 share this skip rule: a halted or already
+    # staged/sent response must not be overwritten by render or SSE.
+    defp response_committed?(%Plug.Conn{halted: true}), do: true
+    defp response_committed?(%Plug.Conn{state: state}), do: state != :unset
 
     # function_exported?/3 alone returns false for modules the code server
     # has not loaded yet, so under lazy loading (dev/test, fresh VM) the

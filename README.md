@@ -110,8 +110,9 @@ That's the whole page. Notice what's *absent*:
   resolves its URL in the browser (`location.pathname + '/_event/...'`),
   so path params like `/:workspace_slug` need no server-side plumbing.
 - No `Dstar.start()` — event POSTs are SSE by definition, so the
-  library starts the stream before calling you.
-- No allowlist registration — the `dstar` route *is* the allowlist.
+  library starts the stream before calling `handle_event/3`.
+- No allowlist registration — the `dstar` route *is* the code
+  allowlist, not an authorization check.
 
 > **Routing through `:protect_from_forgery`?** Event POSTs need the CSRF
 > token as a signal — one plug plus one `<body>` attribute. See
@@ -158,6 +159,58 @@ end
 This matters on HTTP/1.1 keep-alive, where the connection process outlives
 the stream and goes on to serve unrelated requests.
 
+### Authorization
+
+`dstar/2` exposes three independent routes. Put session-wide
+authentication on the surrounding pipeline so it covers GET, event POST,
+stream POST, and `dstar_components/2`:
+
+```elixir
+scope "/", MyAppWeb do
+  pipe_through [:browser, :require_authenticated_user]
+
+  dstar "/settings", SettingsPage
+  dstar_components "/ds", [DetailDrawer]
+end
+```
+
+`mount/2` runs only on the GET. A tenant or ownership check there does
+**not** protect a direct `POST /path/_event/:event` or `POST /path` —
+those skip `mount/2` and start SSE before `handle_event/3` /
+`handle_connect/2` can return a normal 401/403.
+
+Use optional `authorize/2` for page-local checks. It runs after signals
+are read and before SSE starts. Halt or send a response to reject;
+return the conn (with any assigns you need) to continue:
+
+```elixir
+def authorize(conn, {:event, "export"}) do
+  if admin?(conn) do
+    conn
+  else
+    conn
+    |> Plug.Conn.send_resp(403, "Forbidden")
+    |> Plug.Conn.halt()
+  end
+end
+
+def authorize(conn, {:event, _event}), do: conn
+
+def authorize(conn, {:stream, _params}) do
+  if conn.assigns[:current_user] do
+    conn
+  else
+    conn
+    |> Plug.Conn.send_resp(401, "Unauthorized")
+    |> Plug.Conn.halt()
+  end
+end
+```
+
+The route is a *code* allowlist. Interpolating a record id into the
+event name is fine; `authorize/2` (or the component handler, before
+`start/1`) must still prove the current user may touch that id.
+
 ### Shared components
 
 UI used across many pages — with its event handlers in the same module:
@@ -175,8 +228,18 @@ defmodule MyAppWeb.DetailDrawer do
   end
 
   def handle_event(conn, "change_title:" <> id, signals) do
-    # update the record, then patch
-    conn |> start() |> patch_signals(%{saved: true})
+    # The module allowlist only selects this handler. Authorize the
+    # record *before* start/1 — after that the response is already 200 SSE.
+    case Items.fetch_for_user(conn.assigns.current_user, id) do
+      {:ok, item} ->
+        {:ok, _} = Items.update_title(item, signals["title"])
+        conn |> start() |> patch_signals(%{saved: true})
+
+      :error ->
+        conn
+        |> Plug.Conn.send_resp(403, "Forbidden")
+        |> Plug.Conn.halt()
+    end
   end
 end
 ```
@@ -648,7 +711,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 
 | Module | Functions |
 |--------|-----------|
-| `Dstar.Page` | behaviour + `use` macro: `mount/2`, `render/1`, `handle_event/3`, `handle_connect/2`, `handle_info/2`, `stream_key/1`, `handle_disconnect/1` |
+| `Dstar.Page` | behaviour + `use` macro: `mount/2`, `authorize/2`, `render/1`, `handle_event/3`, `handle_connect/2`, `handle_info/2`, `stream_key/1`, `handle_disconnect/1` |
 | `Dstar.Page.Plug` | request driver: handles page, event, and stream actions |
 | `Dstar.Component` | shared UI with colocated event handlers |
 | `Dstar.Router` | `dstar/2` (page routes), `dstar_components/2` (dispatch route) |

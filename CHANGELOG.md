@@ -4,6 +4,22 @@
 
 ### Security
 
+- **Pages can reject event and stream POSTs with a normal 401/403
+  before SSE starts (#28).** Optional `Dstar.Page.authorize/2` runs
+  after signals are read and before `Dstar.SSE.start/1` /
+  `start_stream/2`. A halted or already-staged response is returned as
+  ordinary HTTP — no chunked 200, no `handle_event/3` /
+  `handle_connect/2`, no `stream_key/1` registration. Assigns set in
+  `authorize/2` are visible to later callbacks.
+
+  `mount/2` still authorizes only the GET. Router and component-module
+  allowlists select *code*, not whether the current user may perform
+  the event or touch a record id interpolated into the event name.
+  Session-wide authentication stays in the surrounding `pipe_through`;
+  `authorize/2` is the page-local / resource-specific seam. Component
+  handlers (which call `start/1` themselves) must authorize before
+  that call if they need a normal 401/403.
+
 - **CSRF guidance is fail-safe, and `RenameCsrfParam` no longer lets a
   query `_csrf_token` hide a valid source token (#27).** The plug decides
   whether `_csrf_token` is already present by inspecting `body_params` —

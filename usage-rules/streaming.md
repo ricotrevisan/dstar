@@ -4,6 +4,11 @@
 
 Dstar uses **long-lived SSE connections** with Phoenix PubSub for real-time updates.
 
+On `Dstar.Page`, optional `authorize/2` runs **before** `handle_connect/2`
+and before any `stream_key/1` registration. Reject there with a normal
+401/403; `mount/2` does not run on the stream POST. The router pipeline
+is still the place for session-wide authentication.
+
 ## Basic Pattern
 
 ```elixir
