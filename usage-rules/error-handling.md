@@ -4,6 +4,47 @@ Practical patterns for handling errors in Dstar SSE handlers, including validati
 
 ---
 
+## 0. Authorization before SSE
+
+On `Dstar.Page`, `handle_event/3` and `handle_connect/2` run *after*
+`Dstar.SSE.start/1`. A 401/403 from those callbacks is too late — the
+response is already a chunked 200.
+
+Use optional `authorize/2` to reject with a normal status. `mount/2`
+does not run on event or stream POSTs; a check only there is not a
+boundary. The router pipeline is still the place for session-wide
+authentication.
+
+```elixir
+def authorize(conn, {:event, "delete:" <> id}) do
+  case Items.fetch_for_user(conn.assigns.current_user, id) do
+    {:ok, item} -> assign(conn, :item, item)
+    :error ->
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+  end
+end
+
+def authorize(conn, {:event, _event}), do: conn
+
+def authorize(conn, {:stream, _params}) do
+  if conn.assigns[:current_user] do
+    conn
+  else
+    conn
+    |> Plug.Conn.send_resp(401, "Unauthorized")
+    |> Plug.Conn.halt()
+  end
+end
+```
+
+Component handlers call `start/1` themselves. Authorize the record
+before that call if you need a normal 401/403. Interpolating an id
+into the event name is not an authorization check.
+
+---
+
 ## 1. Rescue in Handlers
 
 Wrap handler logic in explicit error handling. Send error signals back to the client on failure.

@@ -6,8 +6,8 @@ if Code.ensure_loaded?(Phoenix.Component) do
     `use Dstar.Page` imports these instead of `Phoenix.Component`'s assign
     family, so one set of names works everywhere:
 
-    - On a `%Plug.Conn{}` (in `mount/2`, `handle_event/3`, `handle_connect/2`,
-      `handle_info/2`) they behave like `Plug.Conn.assign/3`.
+    - On a `%Plug.Conn{}` (in `mount/2`, `authorize/2`, `handle_event/3`,
+      `handle_connect/2`, `handle_info/2`) they behave like `Plug.Conn.assign/3`.
     - On anything else (sockets, assigns maps inside function components)
       they delegate to `Phoenix.Component`.
     """

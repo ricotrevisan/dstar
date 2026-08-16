@@ -235,6 +235,41 @@ end
 - No `render/1` callback — use standard Phoenix templates
 - No `event("name")` — use `@post('/path')` or `Dstar.post(Module, "name")`
 
+If you migrate onto `Dstar.Page` instead of a controller: **`mount/2` is
+not PhoenixDatastar/LiveView `mount`.** It runs only on the GET. Event
+and stream POSTs are separate routes; they skip `mount/2` and start SSE
+before `handle_event/3` / `handle_connect/2`. Put session-wide
+authentication on the router pipeline (it already covers GET, event,
+stream, and `dstar_components/2`). Put page/resource checks in
+`authorize/2`, which can still return a normal 401/403. The `dstar/2`
+route and the component-module list select *code* — they do not
+authorize the current user to touch a record id interpolated into the
+event name.
+
+```elixir
+def authorize(conn, {:event, "change_title:" <> id}) do
+  case Items.fetch_for_user(conn.assigns.current_user, id) do
+    {:ok, item} -> assign(conn, :item, item)
+    :error ->
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+  end
+end
+
+def authorize(conn, {:event, _event}), do: conn
+
+def authorize(conn, {:stream, _params}) do
+  if conn.assigns[:current_user] do
+    conn
+  else
+    conn
+    |> Plug.Conn.send_resp(401, "Unauthorized")
+    |> Plug.Conn.halt()
+  end
+end
+```
+
 ### Stateless views using dynamic dispatch
 
 If you prefer handler modules over controller actions (closer to the PhoenixDatastar pattern):

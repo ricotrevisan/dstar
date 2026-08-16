@@ -29,6 +29,29 @@ defmodule Dstar.Page do
   All requests are driven by `Dstar.Page.Plug` — pages contain no
   control flow, only callbacks. Conn in, conn out.
 
+  ## Authorization
+
+  `dstar/2` registers three independent routes. Session-wide
+  authentication belongs in the surrounding router pipeline — it already
+  covers GET, event POST, stream POST, and `dstar_components/2`.
+
+  `mount/2` runs only on the GET. Putting a tenant or ownership check
+  there does not protect a direct `POST /path/_event/:event` or
+  `POST /path`. Those skip `mount/2` and would otherwise start SSE
+  (status 200, `text/event-stream`) before `handle_event/3` or
+  `handle_connect/2` can return a normal 401/403.
+
+  Use the optional `authorize/2` callback for page-local checks. It runs
+  after signals are read and **before** `Dstar.SSE.start/1` /
+  `start_stream/2`. Halt or send a response to reject; return the conn
+  to continue. Assigns and private data you set are visible to later
+  callbacks.
+
+  Route and component-module allowlists select *code*. They do not
+  authorize the current user to touch a particular record. Interpolating
+  an id into the event name (`"change_title:" <> id`) is fine; the
+  handler or `authorize/2` must still prove the user may touch `id`.
+
   ## Options
 
   - `:idle_check` — ms between connection liveness checks in the stream
@@ -40,6 +63,52 @@ defmodule Dstar.Page do
 
   @doc "The full-page HEEx template. Required."
   @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
+
+  @doc """
+  Pre-SSE gate for event and stream POSTs. Optional.
+
+  Invoked after query params (and, for events, signals) are read, and
+  before `Dstar.SSE.start/1` or `Dstar.start_stream/2`. The second
+  argument is `{:event, event}` or `{:stream, params}`.
+
+  Same skip rule as `mount/2`: if the returned conn is halted or has
+  already staged/sent a response (`state != :unset`), the plug returns
+  it as a normal HTTP response and does not start SSE, call
+  `handle_event/3` / `handle_connect/2`, or register a `stream_key/1`.
+
+      def authorize(conn, {:event, "export"}) do
+        if admin?(conn) do
+          conn
+        else
+          conn
+          |> Plug.Conn.send_resp(403, "Forbidden")
+          |> Plug.Conn.halt()
+        end
+      end
+
+      def authorize(conn, {:event, _event}), do: conn
+
+      def authorize(conn, {:stream, _params}) do
+        if conn.assigns[:current_user] do
+          conn
+        else
+          conn
+          |> Plug.Conn.send_resp(401, "Unauthorized")
+          |> Plug.Conn.halt()
+        end
+      end
+
+  Session-wide authentication still belongs in the router pipeline.
+  This callback is for page/resource checks and preconditions. Signals
+  are already parsed; read them with `Dstar.Signals.read/1` if a check
+  needs the payload.
+
+  Does not run on GET — that is `mount/2`.
+  """
+  @callback authorize(
+              Plug.Conn.t(),
+              {:event, event :: String.t()} | {:stream, params :: map()}
+            ) :: Plug.Conn.t()
 
   @doc "Handles a Datastar event POST. SSE is already started. Optional."
   @callback handle_event(Plug.Conn.t(), event :: String.t(), signals :: map()) :: Plug.Conn.t()
@@ -90,6 +159,7 @@ defmodule Dstar.Page do
   @callback handle_disconnect(Plug.Conn.t()) :: any()
 
   @optional_callbacks mount: 2,
+                      authorize: 2,
                       handle_event: 3,
                       handle_connect: 2,
                       handle_info: 2,
