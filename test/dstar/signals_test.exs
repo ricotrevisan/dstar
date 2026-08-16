@@ -4,6 +4,8 @@ defmodule Dstar.SignalsTest do
 
   alias Dstar.{Signals, SSE}
 
+  import Dstar.Test
+
   # Helper to create a chunked SSE conn
   defp chunked_conn do
     conn(:post, "/test")
@@ -92,6 +94,7 @@ defmodule Dstar.SignalsTest do
       result = Signals.remove_signals(conn, "count")
 
       assert result.state == :chunked
+      assert_patched_signals(result, %{count: nil})
     end
 
     test "removes a nested signal with dot notation" do

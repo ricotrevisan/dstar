@@ -61,7 +61,15 @@ defmodule Dstar.Test do
 
   @doc """
   Asserts the given signals (a subset) were patched. Keys may be atoms
-  or strings; values compare against the JSON-decoded patch.
+  or strings — this convenience applies to **top-level keys only**;
+  nested JSON object keys must be strings, since values compare against
+  the JSON-decoded patch as-is.
+
+  An expected `nil` passes only when the emitted JSON explicitly contains
+  the key with a null value (e.g. after `remove_signals/2`). If the signal
+  was never patched, the assertion fails with a "signal was not patched"
+  message instead of silently passing on a missing key.
+
   Returns the conn for piping.
   """
   def assert_patched_signals(conn, expected) when is_map(expected) do
@@ -70,9 +78,17 @@ defmodule Dstar.Test do
     for {key, value} <- expected do
       key = to_string(key)
 
-      assert Map.get(actual, key) == value,
-             "expected signal #{inspect(key)} to be patched to #{inspect(value)}, " <>
-               "got #{inspect(Map.get(actual, key))}. All patched signals: #{inspect(actual)}"
+      case Map.fetch(actual, key) do
+        :error ->
+          assert false,
+                 "expected signal #{inspect(key)} to be patched to #{inspect(value)}, " <>
+                   "but the signal was not patched. All patched signals: #{inspect(actual)}"
+
+        {:ok, actual_value} ->
+          assert actual_value == value,
+                 "expected signal #{inspect(key)} to be patched to #{inspect(value)}, " <>
+                   "got #{inspect(actual_value)}. All patched signals: #{inspect(actual)}"
+      end
     end
 
     conn

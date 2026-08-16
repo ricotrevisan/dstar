@@ -38,12 +38,43 @@ defmodule Dstar.TestTest do
       assert_patched_signals(conn, %{count: 1, name: "rico"})
     end
 
-    test "fails on a wrong value" do
+    test "fails on a wrong value and reports it separately from a missing key" do
       conn = sse_conn() |> Dstar.patch_signals(%{count: 1})
 
-      assert_raise ExUnit.AssertionError, fn ->
-        assert_patched_signals(conn, %{count: 2})
-      end
+      error =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_patched_signals(conn, %{count: 2})
+        end
+
+      refute error.message =~ "not patched"
+      assert error.message =~ "expected signal \"count\" to be patched to 2"
+      assert error.message =~ "got 1"
+      assert error.message =~ ~s(%{"count" => 1})
+    end
+
+    test "fails on a missing key even when the expected value is nil" do
+      conn = sse_conn() |> Dstar.patch_signals(%{name: "rico"})
+
+      error =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_patched_signals(conn, %{count: nil})
+        end
+
+      assert error.message =~ "expected signal \"count\" to be patched to nil"
+      assert error.message =~ "signal was not patched"
+      assert error.message =~ ~s(%{"name" => "rico"})
+    end
+
+    test "passes when the emitted JSON explicitly contains the key with null" do
+      conn = sse_conn() |> Dstar.patch_signals(%{count: nil})
+
+      assert_patched_signals(conn, %{count: nil})
+    end
+
+    test "passes with top-level string keys like with atom keys" do
+      conn = sse_conn() |> Dstar.patch_signals(%{count: 1})
+
+      assert_patched_signals(conn, %{"count" => 1})
     end
 
     test "deep-merges nested signal patches like the Datastar client" do
@@ -53,6 +84,16 @@ defmodule Dstar.TestTest do
         |> Dstar.patch_signals(%{user: %{count: 5}})
 
       assert_patched_signals(conn, %{user: %{"name" => "rico", "count" => 5}})
+    end
+
+    test "normalizes atom/string keys only at the top level; nested keys must be strings" do
+      conn = sse_conn() |> Dstar.patch_signals(%{user: %{name: "rico"}})
+
+      assert_patched_signals(conn, %{user: %{"name" => "rico"}})
+
+      assert_raise ExUnit.AssertionError, fn ->
+        assert_patched_signals(conn, %{user: %{name: "rico"}})
+      end
     end
   end
 
