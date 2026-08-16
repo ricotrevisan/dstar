@@ -36,6 +36,44 @@ defp loop(conn) do
 end
 ```
 
+## Optional per-tab deduplication
+
+Add `Dstar.Utility.StreamRegistry` to the supervision tree and a
+`data-signals:tab-id` value backed by `sessionStorage`. Then a hand-rolled loop
+can claim before subscribing:
+
+```elixir
+def stream(conn, _params) do
+  conn = Dstar.start_stream(conn, conn.assigns.current_user.id)
+
+  if conn.halted do
+    # Valid tabId, but the atomic claim failed: ordinary non-SSE 503.
+    conn
+  else
+    Phoenix.PubSub.subscribe(MyApp.PubSub, "topic")
+
+    try do
+      loop(conn)
+    after
+      Dstar.Utility.StreamRegistry.release(conn)
+      Phoenix.PubSub.unsubscribe(MyApp.PubSub, "topic")
+    end
+  end
+end
+```
+
+A missing/invalid `tabId` intentionally starts an unkeyed stream for rollout
+compatibility. A valid keyed request is different: claims are linearizable and
+fail closed, so `Dstar.start/1` is never called after claim failure. Concurrent
+contenders can succeed in coordinator order and then be replaced; the final
+claimant is the sole active owner, while displaced generations remain tracked
+through graceful release or bounded kill escalation.
+
+`Dstar.Page` owns this flow when `stream_key/1` is defined. It returns claim
+failure before `handle_connect/2`, matches generation-tagged replacements so a
+stale keep-alive mailbox message cannot stop the next stream, and releases the
+exact generation before `handle_disconnect/1`.
+
 ## Client-side Setup
 
 **Initialize stream on mount:**

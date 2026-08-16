@@ -52,6 +52,19 @@ defmodule Dstar.Page do
   an id into the event name (`"change_title:" <> id`) is fine; the
   handler or `authorize/2` must still prove the user may touch `id`.
 
+  ## Stream deduplication
+
+  Define `stream_key/1` to opt a Page stream into
+  `Dstar.Utility.StreamRegistry`. The coordinator atomically claims
+  `{stream_key, tabId}` before SSE and `handle_connect/2`. A valid keyed claim
+  failure returns a normal halted 503 and neither callback nor loop runs;
+  missing/invalid `tabId` intentionally starts unkeyed.
+
+  Takeovers carry an ownership generation. The loop ignores stale generations
+  left in a reused keep-alive process and synchronously releases the exact
+  current generation before `handle_disconnect/1`, closing the stale
+  release-versus-kill race.
+
   ## Options
 
   - `:idle_check` — ms between connection liveness checks in the stream
@@ -126,7 +139,14 @@ defmodule Dstar.Page do
   @doc "Handles one message from the library-owned receive loop. Optional."
   @callback handle_info(msg :: term(), Plug.Conn.t()) :: Plug.Conn.t() | {:halt, Plug.Conn.t()}
 
-  @doc "If defined, the stream opens via `Dstar.start_stream/2` keyed on the result. Optional."
+  @doc """
+  If defined, the stream atomically claims `{result, tabId}` through
+  `Dstar.start_stream/2` before `handle_connect/2`. Optional.
+
+  A valid keyed claim failure returns a halted non-SSE 503 and skips the
+  connect callback/loop. Missing or invalid `tabId` is the intentional unkeyed
+  fallback.
+  """
   @callback stream_key(Plug.Conn.t()) :: term()
 
   @doc """
@@ -135,8 +155,9 @@ defmodule Dstar.Page do
 
   Runs on every exit from the receive loop: a `{:halt, conn}` from
   `handle_info/2`, a dead client, or a takeover by a newer stream for the
-  same `stream_key/1`. The library already unregisters the stream from
-  `Dstar.Utility.StreamRegistry` for you; this is for app-owned state.
+  same `stream_key/1`. The library synchronously releases the exact claim
+  generation before invoking this callback; this callback is for app-owned
+  state.
 
   The client is usually gone by this point, so treat the conn as
   write-only-on-a-best-effort basis. A crash here is logged and swallowed —

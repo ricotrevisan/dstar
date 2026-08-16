@@ -197,6 +197,21 @@ data-signals:items="[]"          <%!-- Array --%>
 </div>
 ```
 
+### Optional stream deduplication
+
+Supervise `Dstar.Utility.StreamRegistry`, add a sessionStorage-backed
+`data-signals:tab-id`, and define Page `stream_key/1` (preferred) or call
+`Dstar.start_stream(conn, scope_key)` in a hand-rolled stream.
+
+Keyed claims are linearizable and fail closed. A claim failure returns a halted,
+non-SSE 503 conn and must not enter `handle_connect`/the loop; missing or invalid
+`tabId` is the separate, intentional unkeyed fallback. For hand-rolled loops,
+check `conn.halted` before subscribing and call
+`Dstar.Utility.StreamRegistry.release(conn)` in `after`. Page performs exact,
+generation-safe release automatically before `handle_disconnect/1`, and stale
+replacement messages from a reused keep-alive process cannot stop a newer
+stream.
+
 ## CSRF Setup
 
 Phoenix expects the CSRF token in the `_csrf_token` body param — and Datastar can't deliver that: its `_`-prefixed signal keys are front-end-only and never sent to the backend. So the token travels as a non-prefixed signal, and one plug copies it into place.

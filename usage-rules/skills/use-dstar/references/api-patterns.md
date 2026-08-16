@@ -182,6 +182,32 @@ end
 </div>
 ```
 
+### Add atomic per-tab deduplication
+
+Add `Dstar.Utility.StreamRegistry` to the supervision tree and a
+sessionStorage-backed `data-signals:tab-id`. For a hand-rolled controller:
+
+```elixir
+conn = Dstar.start_stream(conn, user_id)
+
+if conn.halted do
+  conn # keyed claim failed closed with a non-SSE 503
+else
+  Phoenix.PubSub.subscribe(MyApp.PubSub, "feed:#{user_id}")
+
+  try do
+    stream_loop(conn)
+  after
+    Dstar.Utility.StreamRegistry.release(conn)
+  end
+end
+```
+
+A missing/invalid `tabId` is the intentional unkeyed fallback. A valid keyed
+request starts SSE only after its linearizable claim succeeds. Page modules
+need only define `stream_key/1`; Page skips `handle_connect/2` on claim failure
+and releases the exact generation before disconnect cleanup.
+
 ## Dispatch Handler Module
 
 **Router:**
