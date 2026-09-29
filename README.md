@@ -795,12 +795,12 @@ Community-built libraries and resources that work with Dstar. These are maintain
 
 ### UI component libraries
 
-- [shadcn_ui](https://hex.pm/packages/shadcn_ui) — pure functional Phoenix components that render pure CSS controls, built for the Datastar + SSE stack. [Demo](https://pcharbon70-shadcn-ui-demo.fly.dev/) · [Docs](https://shadcn-ui.hexdocs.pm/readme.html)
+- [shadcn_ui](https://hex.pm/packages/shadcn_ui) — pure functional Phoenix components that render pure CSS controls, built for the Datastar + SSE stack, by [@pcharbon70](https://github.com/pcharbon70). [Demo](https://pcharbon70-shadcn-ui-demo.fly.dev/) · [Docs](https://shadcn-ui.hexdocs.pm/readme.html)
 
 ### Datastar's own component layer
 
-- [Rocket](https://data-star.dev/reference/rocket) — Datastar's web-component API (MIT, formerly Datastar Pro). Reach for it when a control needs real client-side state; plain Dstar signals and `Dstar.Component` cover the rest.
-- [Starbase](https://starbase.zweiundeins.gmbh/) — a community gallery of copy-and-paste Rocket components, in case one already exists for what you're building.
+- [Rocket](https://data-star.dev/reference/rocket) — Datastar's web-component API (MIT, formerly Datastar Pro), by the [Star Federation](https://github.com/starfederation). Reach for it when a control needs real client-side state; plain Dstar signals and `Dstar.Component` cover the rest.
+- [Starbase](https://starbase.zweiundeins.gmbh/) — a community gallery of copy-and-paste Rocket components by [@zweiundeins](https://github.com/zweiundeins), in case one already exists for what you're building.
 
 Building something on Dstar? Open an issue and we'll add it here.
 
