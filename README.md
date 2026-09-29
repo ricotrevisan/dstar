@@ -789,6 +789,21 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.Plugs.RenameCsrfParam` | Standard Plug for CSRF param compatibility |
 | `Dstar.Utility.StreamRegistry` | Opt-in per-tab stream deduplication (see [Stream Deduplication](#stream-deduplication-optional)) |
 
+## Ecosystem
+
+Community-built libraries and resources that work with Dstar. These are maintained outside this package — check each project's own docs and release notes before depending on it.
+
+### UI component libraries
+
+- [shadcn_ui](https://hex.pm/packages/shadcn_ui) — pure functional Phoenix components that render pure CSS controls, built for the Datastar + SSE stack. [Demo](https://pcharbon70-shadcn-ui-demo.fly.dev/) · [Docs](https://shadcn-ui.hexdocs.pm/readme.html)
+
+### Datastar's own component layer
+
+- [Rocket](https://data-star.dev/reference/rocket) — Datastar's web-component API (MIT, formerly Datastar Pro). Reach for it when a control needs real client-side state; plain Dstar signals and `Dstar.Component` cover the rest.
+- [Starbase](https://starbase.zweiundeins.gmbh/) — a community gallery of copy-and-paste Rocket components, in case one already exists for what you're building.
+
+Building something on Dstar? Open an issue and we'll add it here.
+
 ## Dependencies
 
 Just two:
