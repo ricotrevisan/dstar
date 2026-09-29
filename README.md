@@ -33,7 +33,7 @@ Add `dstar` to your deps in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:dstar, "~> 0.2.0"}
+    {:dstar, "~> 0.3.0"}
   ]
 end
 ```

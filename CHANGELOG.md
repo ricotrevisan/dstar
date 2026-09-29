@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-09-29
+
+### Upgrading from 0.2
+
+Most apps need no code changes. Check these:
+
+- **Action URL expressions changed shape (#25).** Page `event/2`, `connect/1`,
+  component and `Dstar.Actions` expressions are now built by one structured
+  builder: literals are JSON-encoded and segments are percent-encoded. Tests
+  that assert the literal old strings (for example
+  `"@post(location.pathname, {retryMaxCount: Infinity})"`) must be updated.
+  `phoenix_test_datastar` needs 0.0.3 or later to resolve the new URLs.
+- **`prefix:` is validated.** Values that aren't a local absolute path raise
+  `ArgumentError`. `""` and `"/"` still mean no prefix.
+- **`Dstar.Scripts.redirect/3` rejects off-origin destinations** unless you
+  pass `external: true` or `allow: [host]`.
+- **Hand-rolled stream loops** should not match `{:EXIT, _, :replaced}`: the
+  registry's replacement signal is now generation-tagged. Move the loop to
+  `Dstar.Stream.run/2`, or use `start_stream/2,3` plus `release/1`.
+- **Malformed, non-object or oversized signals** now get a 400/413 before
+  Page, Dispatch or keyed-stream handlers run.
+
+
 ### Added
 
 - **`Dstar.Stream` — the stream loop for plain controllers.** `open/2`
@@ -120,6 +143,8 @@
 
 ### Fixed
 
+- **`prefix: ""` is accepted again as "no prefix".** The #25 validation
+  rejected it, although it renders exactly the default `/ds` URL.
 - **`format_event`/`format_patch` now produce exactly what `send_event`/`patch`
   send.** `Dstar.SSE` builds every frame in one encoder. Before,
   `Dstar.Signals.format_patch/2` and `Dstar.Elements.format_patch/2` silently
