@@ -103,6 +103,26 @@
   Off-origin `http`/`https` requires `external: true` or `allow: ["host"]`.
   `execute_script/3` is unchanged (trusted-code API).
 
+### Fixed
+
+- **`format_event`/`format_patch` now produce exactly what `send_event`/`patch`
+  send.** `Dstar.SSE` builds every frame in one encoder. Before,
+  `Dstar.Signals.format_patch/2` and `Dstar.Elements.format_patch/2` silently
+  dropped `:event_id` and `:retry`, `format_event(nil, …)` emitted an empty
+  `event:` line, and `format_event(type, [])` emitted a stray blank line.
+  `Dstar.SSE.format_event/3` now accepts the same options as `send_event/4`.
+- **`Dstar.Signals.patch_raw/3` sends multi-line JSON correctly.** Each line
+  now goes out as its own `data: signals <line>`, which the client reassembles.
+  Before, continuation lines went out without the `signals` key, and the
+  client dropped them.
+
+### Internal
+
+- Line-terminator handling for Datastar data fields lives in `Dstar.SSE`:
+  `elements` and `signals` are split per line, and every other field
+  (`selector`, `mode`, …) has its terminators stripped. Elements, Signals and
+  Scripts now only declare their fields.
+
 ## 0.2.0 — 2026-08-05
 
 ### Changed

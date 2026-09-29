@@ -2,6 +2,9 @@ defmodule Dstar.SSE do
   # The Datastar SDK's default reconnection time, in ms. See maybe_add_retry/2.
   @default_retry 1000
 
+  # Datastar data keys whose values may span lines. See datastar_data/1.
+  @multi_line_keys ["elements", "signals"]
+
   @moduledoc """
   Server-Sent Event (SSE) connection helpers.
 
@@ -90,27 +93,10 @@ defmodule Dstar.SSE do
       {:ok, conn} = Dstar.SSE.send_event(conn, "my-event", ["line1", "line2"])
 
   """
-  @spec send_event(Plug.Conn.t(), String.t(), list(String.t()) | String.t(), keyword()) ::
+  @spec send_event(Plug.Conn.t(), String.t() | nil, list(String.t()) | String.t(), keyword()) ::
           {:ok, Plug.Conn.t()} | {:error, term()}
   def send_event(conn, event_type, data_lines, opts \\ []) do
-    data_lines = if is_binary(data_lines), do: [data_lines], else: data_lines
-
-    event_content =
-      []
-      |> maybe_add_event(event_type)
-      |> maybe_add_id(opts[:event_id])
-      |> maybe_add_retry(opts[:retry])
-      |> add_data_lines(data_lines)
-      |> Enum.join()
-      |> Kernel.<>("\n")
-
-    case Plug.Conn.chunk(conn, event_content) do
-      {:ok, conn} ->
-        {:ok, conn}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    Plug.Conn.chunk(conn, encode(event_type, data_lines, opts))
   end
 
   @doc """
@@ -123,7 +109,7 @@ defmodule Dstar.SSE do
       |> send_event!("event-b", "data b")
 
   """
-  @spec send_event!(Plug.Conn.t(), String.t(), list(String.t()) | String.t(), keyword()) ::
+  @spec send_event!(Plug.Conn.t(), String.t() | nil, list(String.t()) | String.t(), keyword()) ::
           Plug.Conn.t()
   def send_event!(conn, event_type, data_lines, opts \\ []) do
     case send_event(conn, event_type, data_lines, opts) do
@@ -135,7 +121,8 @@ defmodule Dstar.SSE do
   @doc """
   Formats a single SSE event as a string (no connection needed).
 
-  Useful for building SSE response bodies without chunked streaming.
+  Useful for building SSE response bodies without chunked streaming. Produces
+  exactly the bytes `send_event/4` would chunk, and accepts the same options.
 
   ## Example
 
@@ -143,16 +130,43 @@ defmodule Dstar.SSE do
       # => "event: datastar-patch-signals\\ndata: signals {\\"count\\":42}\\n\\n"
 
   """
-  @spec format_event(String.t(), [String.t()]) :: String.t()
-  def format_event(event_type, data_lines) do
-    event_line = "event: #{strip_line_breaks(event_type)}\n"
+  @spec format_event(String.t() | nil, list(String.t()) | String.t(), keyword()) :: String.t()
+  def format_event(event_type, data_lines, opts \\ []) do
+    encode(event_type, data_lines, opts)
+  end
 
-    data_content =
-      data_lines
-      |> Enum.flat_map(&split_data_value/1)
-      |> Enum.map_join("\n", &"data: #{&1}")
+  @doc false
+  # Datastar event payloads are `key value` data lines. The client splits the
+  # `data:` block on newlines and joins repeated keys with "\n", so a value
+  # spanning several lines must repeat its key on each line. Only `elements`
+  # and `signals` carry multi-line values; every other key is single-valued and
+  # has its line terminators stripped — a terminator there would open a second
+  # field in the same event (see the framing notes below). A key not listed
+  # here is therefore single-valued by default.
+  @spec datastar_data([{String.t(), String.t()}]) :: [String.t()]
+  def datastar_data(fields) do
+    Enum.flat_map(fields, fn
+      {key, value} when key in @multi_line_keys ->
+        value |> split_data_value() |> Enum.map(&"#{key} #{&1}")
 
-    "#{event_line}#{data_content}\n\n"
+      {key, value} ->
+        ["#{key} #{strip_line_breaks(value)}"]
+    end)
+  end
+
+  # The one SSE frame builder: send_event/4 chunks it, format_event/3 returns
+  # it. These were separate copies until format_event dropped `id`/`retry` and
+  # emitted an empty `event:` line for a nil type.
+  defp encode(event_type, data_lines, opts) do
+    data_lines = if is_binary(data_lines), do: [data_lines], else: data_lines
+
+    []
+    |> maybe_add_event(event_type)
+    |> maybe_add_id(opts[:event_id])
+    |> maybe_add_retry(opts[:retry])
+    |> add_data_lines(data_lines)
+    |> Enum.join()
+    |> Kernel.<>("\n")
   end
 
   # Private helpers — SSE framing safety

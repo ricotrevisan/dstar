@@ -17,6 +17,11 @@ defmodule Dstar.ScriptsTest do
   end
 
   describe "execute/3" do
+    test "passes event_id and retry through to the frame" do
+      conn = chunked_conn() |> Scripts.execute("x()", event_id: "s1", retry: 5000)
+      assert chunks(conn) =~ "id: s1\nretry: 5000\n"
+    end
+
     test "executes a basic script with auto_remove" do
       conn = chunked_conn()
       result = Scripts.execute(conn, "alert('hello')")

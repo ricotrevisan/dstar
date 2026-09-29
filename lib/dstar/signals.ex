@@ -148,10 +148,8 @@ defmodule Dstar.Signals do
   @doc """
   Patches signals using a raw JSON string.
 
-  The JSON must be a single line. Embedded line breaks are split across
-  multiple SSE `data:` lines for wire safety, which the client will not
-  reassemble into one `signals` payload — pass compact JSON (as
-  `Jason.encode!/1` produces) or use `patch/3`.
+  Multi-line JSON is sent as one `data: signals <line>` per line, which the
+  client reassembles into a single payload.
 
   ## Example
 
@@ -161,7 +159,7 @@ defmodule Dstar.Signals do
   """
   @spec patch_raw(Plug.Conn.t(), String.t(), keyword()) :: Plug.Conn.t()
   def patch_raw(conn, json, opts \\ []) when is_binary(json) do
-    SSE.send_event!(conn, @event_type, data_lines(json, opts), event_opts(opts))
+    SSE.send_event!(conn, @event_type, data_lines(json, opts), opts)
   end
 
   @doc """
@@ -175,7 +173,7 @@ defmodule Dstar.Signals do
   """
   @spec format_patch(map(), keyword()) :: String.t()
   def format_patch(signals, opts \\ []) when is_map(signals) do
-    SSE.format_event(@event_type, data_lines(Jason.encode!(signals), opts))
+    SSE.format_event(@event_type, data_lines(Jason.encode!(signals), opts), opts)
   end
 
   @doc """
@@ -296,11 +294,7 @@ defmodule Dstar.Signals do
     []
     |> maybe_add_only_if_missing(Keyword.get(opts, :only_if_missing, @default_only_if_missing))
     |> add_signals_data(json)
-  end
-
-  defp event_opts(opts) do
-    [event_id: opts[:event_id], retry: opts[:retry]]
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> SSE.datastar_data()
   end
 
   defp send_input_error(conn, status, body) do
@@ -407,11 +401,11 @@ defmodule Dstar.Signals do
   defp maybe_add_only_if_missing(lines, false), do: lines
 
   defp maybe_add_only_if_missing(lines, true) do
-    lines ++ ["onlyIfMissing true"]
+    lines ++ [{"onlyIfMissing", "true"}]
   end
 
   defp add_signals_data(lines, json) do
-    lines ++ ["signals " <> json]
+    lines ++ [{"signals", json}]
   end
 
   defp paths_to_nil_map(paths) do

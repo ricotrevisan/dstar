@@ -64,7 +64,7 @@ defmodule Dstar.Elements do
   """
   @spec patch(Plug.Conn.t(), String.t() | Phoenix.HTML.safe() | nil, keyword()) :: Plug.Conn.t()
   def patch(conn, html, opts \\ []) do
-    SSE.send_event!(conn, @event_type, data_lines(html, opts), event_opts(opts))
+    SSE.send_event!(conn, @event_type, data_lines(html, opts), opts)
   end
 
   @doc """
@@ -142,7 +142,7 @@ defmodule Dstar.Elements do
   """
   @spec format_patch(String.t() | Phoenix.HTML.safe() | nil, keyword()) :: String.t()
   def format_patch(html, opts \\ []) do
-    SSE.format_event(@event_type, data_lines(html, opts))
+    SSE.format_event(@event_type, data_lines(html, opts), opts)
   end
 
   @doc """
@@ -193,47 +193,37 @@ defmodule Dstar.Elements do
     |> maybe_add_namespace(namespace)
     |> maybe_add_view_transitions(use_view_transitions)
     |> maybe_add_elements(html)
-  end
-
-  defp event_opts(opts) do
-    [event_id: opts[:event_id], retry: opts[:retry]]
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> SSE.datastar_data()
   end
 
   defp maybe_add_selector(lines, nil), do: lines
 
+  # `selector` is single-valued: Dstar.SSE strips its line terminators. A
+  # line break here would otherwise open a *second* field in the same event —
+  # and the client accumulates repeated fields rather than overwriting them, so
+  # an injected `elements` line is prepended to the real HTML and morphed into
+  # the DOM. Any selector built from untrusted data (a record id, a slug) would
+  # be a stored-XSS vector.
   defp maybe_add_selector(lines, selector) do
-    lines ++ ["selector " <> single_line(selector)]
-  end
-
-  # `selector` is a single-valued SSE field, but `Dstar.SSE` splits every
-  # `data:` value on line terminators so multi-line `elements` HTML frames
-  # correctly. A line break here would therefore open a *second* field in the
-  # same event — and the client accumulates repeated fields rather than
-  # overwriting them, so an injected `elements` line is prepended to the real
-  # HTML and morphed into the DOM. Any selector built from untrusted data
-  # (a record id, a slug) would be a stored-XSS vector. Line terminators are
-  # meaningless in a CSS selector, so dropping them loses nothing.
-  defp single_line(value) when is_binary(value) do
-    String.replace(value, ["\r\n", "\r", "\n"], "")
+    lines ++ [{"selector", selector}]
   end
 
   defp maybe_add_mode(lines, :outer), do: lines
 
   defp maybe_add_mode(lines, mode) do
-    lines ++ ["mode " <> to_string(mode)]
+    lines ++ [{"mode", to_string(mode)}]
   end
 
   defp maybe_add_namespace(lines, :html), do: lines
 
   defp maybe_add_namespace(lines, namespace) do
-    lines ++ ["namespace " <> to_string(namespace)]
+    lines ++ [{"namespace", to_string(namespace)}]
   end
 
   defp maybe_add_view_transitions(lines, false), do: lines
 
   defp maybe_add_view_transitions(lines, true) do
-    lines ++ ["useViewTransition true"]
+    lines ++ [{"useViewTransition", "true"}]
   end
 
   defp to_html_string(html) when is_binary(html), do: html
@@ -253,16 +243,7 @@ defmodule Dstar.Elements do
 
   defp maybe_add_elements(lines, nil), do: lines
 
-  defp maybe_add_elements(lines, html) do
-    # Split on every SSE line terminator (CR, LF, CRLF) so each physical line
-    # of HTML becomes its own `data: elements <line>`. Splitting only on LF
-    # would let a lone CR survive inside a single data line, where the client
-    # re-splits on it — forging additional SSE events (see Dstar.SSE).
-    html_lines =
-      html
-      |> String.split(["\r\n", "\r", "\n"])
-      |> Enum.map(&("elements " <> &1))
-
-    lines ++ html_lines
-  end
+  # `elements` is multi-line: Dstar.SSE splits it on every line terminator
+  # (CR, LF, CRLF) into its own `data: elements <line>`.
+  defp maybe_add_elements(lines, html), do: lines ++ [{"elements", html}]
 end

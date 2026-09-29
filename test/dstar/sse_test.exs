@@ -20,7 +20,7 @@ defmodule Dstar.SSETest do
     |> Enum.any?(&(&1 == ""))
   end
 
-  describe "format_event/2" do
+  describe "format_event/3" do
     test "formats a basic event" do
       result = SSE.format_event("my-event", ["hello world"])
       assert result == "event: my-event\ndata: hello world\n\n"
@@ -35,7 +35,51 @@ defmodule Dstar.SSETest do
 
     test "formats empty data lines" do
       result = SSE.format_event("my-event", [])
-      assert result == "event: my-event\n\n\n"
+      assert result == "event: my-event\n\n"
+    end
+
+    test "emits id and retry like send_event" do
+      result = SSE.format_event("e", ["x"], event_id: "e1", retry: 5000)
+      assert result == "event: e\nid: e1\nretry: 5000\ndata: x\n\n"
+    end
+
+    test "omits the event line for a nil type" do
+      assert SSE.format_event(nil, ["x"]) == "data: x\n\n"
+    end
+  end
+
+  describe "send_event/4 and format_event/3 share one encoder" do
+    for {name, type, data, opts} <- [
+          {"basic", "e", ["x"], []},
+          {"empty data", "e", [], []},
+          {"binary data", "e", "a\nb", []},
+          {"nil type", nil, ["x"], []},
+          {"id and retry", "e", ["x"], [event_id: "id\r1", retry: 5000]},
+          {"default retry", "e", ["x"], [retry: 1000]},
+          {"injection", "e\r\revent: f", ["x\r\rdata: y"], [event_id: "i\nj"]}
+        ] do
+      test "#{name}" do
+        type = unquote(type)
+        data = unquote(data)
+        opts = unquote(opts)
+
+        conn = conn(:get, "/") |> SSE.start()
+        {:ok, conn} = SSE.send_event(conn, type, data, opts)
+
+        assert sent_frame(conn) == SSE.format_event(type, data, opts)
+      end
+    end
+  end
+
+  describe "datastar_data/1" do
+    test "multi-line keys repeat the key on every line" do
+      assert SSE.datastar_data([{"elements", "<a>\r\n<b>\r<c>"}, {"signals", "{\n}"}]) ==
+               ["elements <a>", "elements <b>", "elements <c>", "signals {", "signals }"]
+    end
+
+    test "every other key is single-valued and loses its line terminators" do
+      assert SSE.datastar_data([{"selector", "#a\r\nelements <img>"}, {"newKey", "x\ny"}]) ==
+               ["selector #aelements <img>", "newKey xy"]
     end
 
     test "splits a data value containing CR/LF into separate data lines (S1)" do

@@ -780,7 +780,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.Component` | shared UI with colocated event handlers |
 | `Dstar.Router` | `dstar/2` (page routes), `dstar_components/2` (dispatch route) |
 | `Dstar.Test` | `sse_events/1`, `patched_signals/1`, `assert_patched_signals/2`, `assert_patched_element/2` |
-| `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2` |
+| `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2,3` |
 | `Dstar.Signals` | `fetch/1,2`, `read/1`, `send_error/2`, `patch/2,3`, `patch_raw/2,3`, `nudge/2,3`, `remove_signals/2,3`, `format_patch/1,2`, `format_remove/1,2` |
 | `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `append/3,4`, `upsert/2,3`, `format_patch/1,2`, `format_remove/1,2` |
 | `Dstar.Actions` | `post/1,2,3`, `get/1,2,3`, `put/1,2,3`, `patch/1,2,3`, `delete/1,2,3`, `on_nudge/2`, `encode_module/1`, `decode_module/1` |

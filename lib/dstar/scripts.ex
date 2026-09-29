@@ -55,14 +55,7 @@ defmodule Dstar.Scripts do
 
     script_html = "<script#{attrs_str}>#{escape_script_content(script)}</script>"
 
-    element_opts =
-      [
-        selector: "body",
-        mode: :append,
-        event_id: opts[:event_id],
-        retry: opts[:retry]
-      ]
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    element_opts = [selector: "body", mode: :append] ++ Keyword.take(opts, [:event_id, :retry])
 
     Elements.patch(conn, script_html, element_opts)
   end

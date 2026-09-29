@@ -22,6 +22,17 @@ defmodule Dstar.ElementsTest do
     |> Enum.any?(&(&1 == ""))
   end
 
+  describe "format_patch/2 matches patch/3" do
+    test "including event_id and retry" do
+      opts = [selector: "#a", mode: :inner, event_id: "e1", retry: 5000]
+      conn = chunked_conn() |> Elements.patch("<p>\nx</p>", opts)
+      {_adapter, state} = conn.adapter
+
+      assert state.chunks == Elements.format_patch("<p>\nx</p>", opts)
+      assert state.chunks =~ "id: e1\nretry: 5000\n"
+    end
+  end
+
   describe "format_patch/2" do
     test "formats a basic element patch with selector" do
       result = Elements.format_patch("<span>42</span>", selector: "#count")

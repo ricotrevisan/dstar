@@ -179,12 +179,32 @@ defmodule Dstar.SignalsTest do
     end
   end
 
+  describe "patch_raw/3" do
+    test "multi-line JSON repeats the signals key so the client reassembles it" do
+      conn = chunked_conn() |> Signals.patch_raw("{\n  \"a\": 1\n}")
+      {_adapter, state} = conn.adapter
+
+      assert state.chunks ==
+               "event: datastar-patch-signals\n" <>
+                 "data: signals {\ndata: signals   \"a\": 1\ndata: signals }\n\n"
+    end
+  end
+
   describe "format_patch/2" do
     test "formats a basic signal patch" do
       result = Signals.format_patch(%{count: 42})
 
       assert result ==
                "event: datastar-patch-signals\ndata: signals {\"count\":42}\n\n"
+    end
+
+    test "honours event_id and retry like patch/3" do
+      opts = [event_id: "e1", retry: 5000]
+      conn = chunked_conn() |> Signals.patch(%{a: 1}, opts)
+      {_adapter, state} = conn.adapter
+
+      assert state.chunks == Signals.format_patch(%{a: 1}, opts)
+      assert state.chunks =~ "id: e1\nretry: 5000\n"
     end
 
     test "formats with only_if_missing" do
