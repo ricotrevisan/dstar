@@ -185,28 +185,37 @@ end
 ### Add atomic per-tab deduplication
 
 Add `Dstar.Utility.StreamRegistry` to the supervision tree and a
-sessionStorage-backed `data-signals:tab-id`. For a hand-rolled controller:
+sessionStorage-backed `data-signals:tab-id`. In a plain controller, open the
+stream with a `key:` and let `Dstar.Stream.run/2` own the loop:
 
 ```elixir
-conn = Dstar.start_stream(conn, user_id)
+case Dstar.Stream.open(conn, key: user_id) do
+  {:ok, conn} ->
+    Dstar.Stream.run(conn,
+      connect: fn conn ->
+        Phoenix.PubSub.subscribe(MyApp.PubSub, "feed:#{user_id}")
+        conn
+      end,
+      info: fn {:new_message, message}, conn ->
+        Dstar.patch_signals(conn, %{latest_message: message.text})
+      end
+    )
 
-if conn.halted do
-  conn # keyed claim failed closed with a non-SSE 503
-else
-  Phoenix.PubSub.subscribe(MyApp.PubSub, "feed:#{user_id}")
-
-  try do
-    stream_loop(conn)
-  after
-    Dstar.Utility.StreamRegistry.release(conn)
-  end
+  {:error, conn} ->
+    conn # 400/413, or keyed claim failed closed with a non-SSE 503
 end
 ```
 
 A missing/invalid `tabId` is the intentional unkeyed fallback. A valid keyed
-request starts SSE only after its linearizable claim succeeds. Page modules
-need only define `stream_key/1`; Page skips `handle_connect/2` on claim failure
-and releases the exact generation before disconnect cleanup.
+request starts SSE only after its linearizable claim succeeds. `run/2` releases
+the exact generation before `:disconnect` (and on any raise) and ignores stale
+takeover signals. Page modules need only define `stream_key/1`; Page runs on
+`Dstar.Stream`, skipping `handle_connect/2` on claim failure.
+
+A loop that must own its `receive` can use the lower-level
+`Dstar.start_stream/2`, return early when `conn.halted`, and call
+`Dstar.Utility.StreamRegistry.release(conn)` in an `after` block; takeover and
+adapter messages are then its own responsibility.
 
 ## Dispatch Handler Module
 

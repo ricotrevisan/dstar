@@ -41,11 +41,11 @@ defmodule Dstar.Utility.StreamRegistry do
   halted, non-SSE 503 response — it never starts an untracked stream.
 
   On replacement, the old holder receives a generation-tagged exit signal.
-  `Dstar.Page` recognizes only the generation stored on its conn,
-  synchronously releases it, and then performs graceful application teardown.
-  A trapping holder that does not release is killed after the grace period.
-  Release and escalation
-  are serialized by this coordinator, so a release that has returned cannot be
+  `Dstar.Stream.run/2` (which `Dstar.Page` streams run on) recognizes only
+  the generation stored on its conn, synchronously releases it, and then
+  performs graceful application teardown. A trapping holder that does not
+  release is killed after the grace period. Release and escalation are
+  serialized by this coordinator, so a release that has returned cannot be
   followed by a stale kill against a keep-alive process now serving unrelated
   work. Stale replacement messages from an older generation cannot stop a newer
   stream in the same process.
@@ -159,11 +159,12 @@ defmodule Dstar.Utility.StreamRegistry do
   releases or is escalated.
 
   The holder's internal exit signal is
-  `{:EXIT, registry_pid, {:replaced, claim_generation}}`. `Dstar.Page`
-  validates the generation and presents the legacy
+  `{:EXIT, registry_pid, {:replaced, claim_generation}}`. `Dstar.Stream`
+  (and so `Dstar.Page`) validates the generation and presents the legacy
   `{:EXIT, registry_pid, :replaced}` shape to application callbacks.
-  Hand-rolled loops should use `start_stream/2,3` and `release/1` rather than
-  consuming this internal signal directly.
+  Controllers should use `Dstar.Stream`; hand-rolled loops should use
+  `start_stream/2,3` and `release/1` rather than consuming this internal
+  signal directly.
   """
   @spec replace_and_register(key()) :: :ok | {:error, term()}
   def replace_and_register(key) do

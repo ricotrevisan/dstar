@@ -67,6 +67,7 @@ defmodule Dstar.MixProject do
         "Functional core": [
           Dstar,
           Dstar.SSE,
+          Dstar.Stream,
           Dstar.Signals,
           Dstar.Elements,
           Dstar.Actions,

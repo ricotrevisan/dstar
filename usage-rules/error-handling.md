@@ -49,14 +49,17 @@ into the event name is not an authorization check.
 
 `Dstar.start_stream/2,3` fails closed for a valid `tabId`: if the opt-in
 `Dstar.Utility.StreamRegistry` cannot atomically claim the key, it returns a
-halted plain-text 503 conn and does **not** start SSE. A hand-rolled controller
-must check `conn.halted` before subscribing or entering its loop. Missing or
+halted plain-text 503 conn and does **not** start SSE. Missing or
 invalid `tabId` is different — it is the intentional unkeyed rollout fallback.
 
-`Dstar.Page` handles the branch automatically: `handle_connect/2` and the loop
-never run after claim failure. It also releases the exact ownership generation
-before `handle_disconnect/1`, so stale escalation cannot kill a reused
-keep-alive process.
+`Dstar.Stream.open(conn, key: scope_key)` surfaces that 503 (and 400/413 for
+unreadable signals) as `{:error, conn}`, so `:connect` and the loop never run.
+`Dstar.Stream.run/2` releases the exact ownership generation before
+`:disconnect` and on any raise, so stale escalation cannot kill a reused
+keep-alive process. `Dstar.Page` runs on it: `handle_connect/2` never runs
+after claim failure, and release happens before `handle_disconnect/1`. A
+lower-level `Dstar.start_stream/2,3` loop must check `conn.halted` before
+subscribing and release the claim itself.
 
 ---
 

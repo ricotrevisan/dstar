@@ -348,36 +348,42 @@ values or signals instead.
 
 ## Real-time Streaming
 
-With `Dstar.Page`, declare subscriptions in `handle_connect/2` and implement `handle_info/2` — the library owns the loop (see Quick Start). The hand-rolled loop below remains fully supported for plain controllers:
+With `Dstar.Page`, declare subscriptions in `handle_connect/2` and implement `handle_info/2` — the library owns the loop (see Quick Start). Plain controllers get the same loop from `Dstar.Stream`:
 
 ```elixir
 defmodule MyAppWeb.TickerController do
   use MyAppWeb, :controller
 
   def stream(conn, _params) do
-    Phoenix.PubSub.subscribe(MyApp.PubSub, "ticker")
-    conn = Dstar.start(conn)
-    loop(conn)
-  end
+    case Dstar.Stream.open(conn) do
+      {:ok, conn} ->
+        Dstar.Stream.run(conn,
+          connect: fn conn ->
+            Phoenix.PubSub.subscribe(MyApp.PubSub, "ticker")
+            conn
+          end,
+          info: fn {:tick, count}, conn -> Dstar.patch_signals(conn, %{tick: count}) end,
+          disconnect: fn _conn -> Phoenix.PubSub.unsubscribe(MyApp.PubSub, "ticker") end
+        )
 
-  defp loop(conn) do
-    receive do
-      {:tick, count} ->
-        # Optional: check connection health
-        case Dstar.check_connection(conn) do
-          {:ok, conn} ->
-            conn = Dstar.patch_signals(conn, %{tick: count})
-            loop(conn)
-          
-          {:error, _conn} ->
-            # Client disconnected, clean up
-            Phoenix.PubSub.unsubscribe(MyApp.PubSub, "ticker")
-            :ok
-        end
+      {:error, conn} ->
+        # Plain HTTP error (400/413/503), never SSE. Don't subscribe.
+        conn
     end
   end
 end
 ```
+
+`:connect` runs once after SSE starts, `:info` gets every application message
+(return `{:halt, conn}` to end the stream), and `:disconnect` runs once when
+the client goes away — idle streams are probed every `:idle_check` ms
+(default 30s). `run/2` also handles the adapter and takeover messages a
+hand-written `receive` easily gets wrong, such as leaving Bandit's HTTP/2
+flow-control messages alone.
+
+A loop that must own its `receive` can still call `Dstar.start/1` (or
+`Dstar.start_stream/2,3`) and recurse by hand; that lower-level path remains
+supported, but those adapter and takeover details are then yours to handle.
 
 **Template:**
 
@@ -438,7 +444,7 @@ This is the **one process** in Dstar. It's opt-in: if you don't need it,
 the library stays zero-process. If you do, you add one child to your
 existing supervision tree.
 
-> With `Dstar.Page`, just define a `stream_key/1` callback — `Dstar.Page.Plug` calls `start_stream/2` for you. The manual `start`/`start_stream` swap in step 3 below applies to hand-rolled controller loops.
+> With `Dstar.Page`, just define a `stream_key/1` callback — `Dstar.Page.Plug` claims the key for you. In a plain controller, pass `key:` to `Dstar.Stream.open/2` (step 3).
 
 ### 1. Add to your supervision tree
 
@@ -470,39 +476,60 @@ across navigations but is unique per tab. Multiple tabs work independently.
 > and never sends them to the server. The signal needs to reach the backend,
 > so it must not have a `_` prefix.
 
-### 3. Replace `Dstar.start(conn)` in stream controllers
+### 3. Pass a `key:` when opening controller streams
+
+```elixir
+case Dstar.Stream.open(conn, key: scope.user.id) do
+  {:ok, conn} ->
+    Dstar.Stream.run(conn,
+      connect: fn conn ->
+        Phoenix.PubSub.subscribe(MyApp.PubSub, "updates")
+        conn
+      end,
+      info: &handle_update/2
+    )
+
+  {:error, conn} ->
+    # 400/413 (bad signals) or 503 (claim refused): ordinary non-SSE
+    # response. Do not subscribe.
+    conn
+end
+```
+
+The key is any term that identifies the user or session
+(e.g., `user.id`, `{user.id, workspace.id}`). The coordinator keys on
+`{scope_key, tab_id}` so different users and different tabs never collide.
+SSE starts only after a keyed claim succeeds. If that claim
+fails, it fails closed with a halted, plain-text 503 conn — never an
+undeduplicated stream advertised as deduplicated.
+
+If no usable `tabId` signal is present, the stream intentionally falls
+back to an unkeyed `Dstar.start/1` so existing streams keep working during
+rollout. That unkeyed fallback is different from a failed claim.
+`Dstar.Stream.run/2` releases the claim before `:disconnect` (and
+`Dstar.Page` before `handle_disconnect/1`), and recognises only its own
+takeover signal, so a stale one on a reused keep-alive process cannot end
+the next stream.
+
+For a loop that must own its `receive`, the lower-level equivalent is
+`Dstar.start_stream/2,3` plus `Dstar.Utility.StreamRegistry.release/1`:
 
 ```elixir
 conn = Dstar.start_stream(conn, scope.user.id)
 
 if conn.halted do
-  # A valid keyed request could not claim the coordinator. This is an
-  # ordinary non-SSE 503 response; do not subscribe or enter the loop.
   conn
 else
-  Phoenix.PubSub.subscribe(MyApp.PubSub, "updates")
-
   try do
     loop(conn)
   after
     Dstar.Utility.StreamRegistry.release(conn)
-    Phoenix.PubSub.unsubscribe(MyApp.PubSub, "updates")
   end
 end
 ```
 
-The second argument is any term that identifies the user or session
-(e.g., `user.id`, `{user.id, workspace.id}`). The coordinator keys on
-`{scope_key, tab_id}` so different users and different tabs never collide.
-It calls `Dstar.start/1` only after a keyed claim succeeds. If that claim
-fails, it fails closed with a halted, plain-text 503 conn — never an
-undeduplicated stream advertised as deduplicated.
-
-If no usable `tabId` signal is present, `start_stream/2` intentionally falls
-back to `Dstar.start/1` so existing streams keep working during rollout. That
-unkeyed fallback is different from a failed claim. On every loop exit,
-hand-rolled streams should call `Dstar.Utility.StreamRegistry.release(conn)`;
-`Dstar.Page` does this automatically before `handle_disconnect/1`.
+Recognising takeover and not swallowing adapter messages is then up to your
+loop — the reason `Dstar.Stream.run/2` exists.
 
 ### What it does
 
@@ -780,6 +807,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.Component` | shared UI with colocated event handlers |
 | `Dstar.Router` | `dstar/2` (page routes), `dstar_components/2` (dispatch route) |
 | `Dstar.Test` | `sse_events/1`, `patched_signals/1`, `assert_patched_signals/2`, `assert_patched_element/2` |
+| `Dstar.Stream` | `open/1,2`, `run/1,2` — long-lived SSE stream with an owned receive loop, optional per-tab `key:` |
 | `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2,3` |
 | `Dstar.Signals` | `fetch/1,2`, `read/1`, `send_error/2`, `patch/2,3`, `patch_raw/2,3`, `nudge/2,3`, `remove_signals/2,3`, `format_patch/1,2`, `format_remove/1,2` |
 | `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `append/3,4`, `upsert/2,3`, `format_patch/1,2`, `format_remove/1,2` |

@@ -9,8 +9,9 @@ if Code.ensure_loaded?(Phoenix.Controller) do
       `authorize/2`, starts SSE, calls `handle_event/3`.
     - `{:stream, Module}` — POST: optional `authorize/2`, atomically claims
       dedup ownership when `stream_key/1` is defined, starts SSE, calls
-      `handle_connect/2`, then owns the receive loop dispatching to
-      `handle_info/2`. A keyed claim failure returns 503 before the callback.
+      `handle_connect/2`, then runs the receive loop on `Dstar.Stream`,
+      dispatching to `handle_info/2`. A keyed claim failure returns 503
+      before the callback.
 
     `authorize/2` is the pre-SSE seam: a halted or already-staged
     response is returned as ordinary HTTP and SSE never starts.
@@ -152,101 +153,50 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     end
 
     defp open_stream(conn, page) do
-      conn =
-        if function_exported?(page, :stream_key, 1) do
-          Dstar.start_stream(conn, page.stream_key(conn))
-        else
-          Dstar.SSE.start(conn)
-        end
+      opts = [max_bytes: page.__dstar__(:max_signal_bytes)]
 
-      # A keyed claim failure returns an ordinary halted 503 conn. It must not
-      # reach application connect callbacks or the receive loop.
-      if conn.state == :chunked do
-        conn =
-          try do
-            page.handle_connect(conn, conn.params)
-          rescue
-            exception ->
-              Dstar.Utility.StreamRegistry.release(conn)
-              log_crash(page, :handle_connect, exception, __STACKTRACE__)
-              reraise exception, __STACKTRACE__
-          end
+      opts =
+        if function_exported?(page, :stream_key, 1),
+          do: [key: page.stream_key(conn)] ++ opts,
+          else: opts
 
-        loop(conn, page, page.__dstar__(:idle_check))
-      else
-        conn
+      # A refused claim or unreadable signals is an ordinary halted HTTP
+      # response. It must not reach application connect callbacks or the loop.
+      case Dstar.Stream.open(conn, opts) do
+        {:ok, conn} ->
+          Dstar.Stream.run(conn,
+            connect: &connect(&1, page),
+            info: &dispatch_info(page, &1, &2),
+            replaced: &offer_replaced(&2, &1, page),
+            disconnect: &disconnect(&1, page),
+            idle_check: page.__dstar__(:idle_check)
+          )
+
+        {:error, conn} ->
+          conn
       end
     end
 
-    defp loop(conn, page, idle_check) do
-      receive do
-        # Plug adapters notify the conn owner when the response is sent;
-        # this is internal plumbing, never a page message.
-        {:plug_conn, :sent} ->
-          loop(conn, page, idle_check)
-
-        # The coordinator tags replacement signals with the exact claim
-        # generation. A matching signal ends this stream; a stale generation
-        # left in a reused keep-alive process's mailbox is ignored.
-        {:EXIT, _pid, {:replaced, _claim}} = msg ->
-          if Dstar.Utility.StreamRegistry.replacement_for?(conn, msg) do
-            # Release before application teardown. The coordinator can no
-            # longer escalate this generation while a slow callback cleans up.
-            Dstar.Utility.StreamRegistry.release(conn)
-            public_msg = Dstar.Utility.StreamRegistry.public_replacement(msg)
-
-            conn
-            |> offer_replaced(page, public_msg)
-            |> teardown(page)
-          else
-            loop(conn, page, idle_check)
-          end
-
-        # Pre-generation replacement messages can only be stale after this
-        # implementation is running. Ignore them rather than poisoning the
-        # next request on a keep-alive connection.
-        {:EXIT, _pid, :replaced} ->
-          loop(conn, page, idle_check)
-
-        # Bandit's HTTP/2 stream consumes its own two-tuple flow-control
-        # messages by selective receive inside the send path. Leave them in
-        # the mailbox or the stream can stall when its send window drains.
-        msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
-          case dispatch_info(page, msg, conn) do
-            {:halt, conn} -> teardown(conn, page)
-            conn -> loop(conn, page, idle_check)
-          end
-      after
-        idle_check ->
-          case Dstar.check_connection(conn) do
-            {:ok, conn} -> loop(conn, page, idle_check)
-            {:error, conn} -> teardown(conn, page)
-          end
-      end
+    defp connect(conn, page) do
+      page.handle_connect(conn, conn.params)
+    rescue
+      exception ->
+        log_crash(page, :handle_connect, exception, __STACKTRACE__)
+        reraise exception, __STACKTRACE__
     end
 
     # Streaming pages need handle_connect/2 but not handle_info/2, so this
     # dispatch is speculative on both counts: the callback may not exist, and
     # if it does it may have no clause for this message. Neither is an error.
-    defp offer_replaced(conn, page, msg) do
+    defp offer_replaced(conn, msg, page) do
       if exported?(page, :handle_info, 2) do
-        case dispatch_info(page, msg, conn, warn_unhandled: false) do
-          {:halt, conn} -> conn
-          conn -> conn
-        end
+        dispatch_info(page, msg, conn, warn_unhandled: false)
       else
         conn
       end
     end
 
-    # Registry entries and PubSub subscriptions are released when the owning
-    # process dies. Under HTTP/1.1 keep-alive the connection process does NOT
-    # die when the stream ends — it is reused for the next request on that
-    # socket — so without this everything the stream registered stays
-    # registered, owned by a process now serving unrelated traffic.
-    defp teardown(conn, page) do
-      Dstar.Utility.StreamRegistry.release(conn)
-
+    defp disconnect(conn, page) do
       if exported?(page, :handle_disconnect, 1) do
         try do
           page.handle_disconnect(conn)
@@ -254,8 +204,6 @@ if Code.ensure_loaded?(Phoenix.Controller) do
           exception -> log_crash(page, :handle_disconnect, exception, __STACKTRACE__)
         end
       end
-
-      conn
     end
 
     defp maybe_authorize(conn, page, action) do

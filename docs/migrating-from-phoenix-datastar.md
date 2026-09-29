@@ -436,12 +436,20 @@ defmodule MyAppWeb.GameStreamController do
 end
 ```
 
-For navigation-heavy streams, optionally replace `Dstar.start/1` with
-`Dstar.start_stream/2` after adding the coordinator and `tabId` signal above.
-A hand-rolled controller must return immediately when the conn is halted (keyed
-claim failure = non-SSE 503), subscribe only after success, and call
+Dstar also ships `Dstar.Stream`, which owns this loop for plain controllers
+(subscribe in `:connect`, handle messages in `:info`, clean up in
+`:disconnect`) and handles the adapter and takeover messages a hand-written
+`receive` can get wrong. The loop above keeps working; prefer
+`Dstar.Stream.open/2` + `Dstar.Stream.run/2` for new streams.
+
+For navigation-heavy streams, add the coordinator and `tabId` signal above and
+pass `key:` to `Dstar.Stream.open/2`; `{:error, conn}` is a plain HTTP response
+(keyed claim failure = non-SSE 503), and `run/2` releases the exact claim
+generation before `:disconnect`. A loop that keeps its own `receive` can use
+the lower-level `Dstar.start_stream/2` instead: return immediately when the
+conn is halted, subscribe only after success, and call
 `Dstar.Utility.StreamRegistry.release(conn)` in an `after` block. Page modules
-get that fail-closed claim and exact generation release automatically from
+get the fail-closed claim and exact generation release automatically from
 `stream_key/1`.
 
 ```heex

@@ -201,16 +201,19 @@ data-signals:items="[]"          <%!-- Array --%>
 
 Supervise `Dstar.Utility.StreamRegistry`, add a sessionStorage-backed
 `data-signals:tab-id`, and define Page `stream_key/1` (preferred) or call
-`Dstar.start_stream(conn, scope_key)` in a hand-rolled stream.
+`Dstar.Stream.open(conn, key: scope_key)` in a plain controller, then
+`Dstar.Stream.run/2` for the loop.
 
 Keyed claims are linearizable and fail closed. A claim failure returns a halted,
-non-SSE 503 conn and must not enter `handle_connect`/the loop; missing or invalid
-`tabId` is the separate, intentional unkeyed fallback. For hand-rolled loops,
-check `conn.halted` before subscribing and call
-`Dstar.Utility.StreamRegistry.release(conn)` in `after`. Page performs exact,
-generation-safe release automatically before `handle_disconnect/1`, and stale
+non-SSE 503 conn (`{:error, conn}`) and must not enter `handle_connect`/`:connect`
+or the loop; missing or invalid `tabId` is the separate, intentional unkeyed
+fallback. `Dstar.Stream.run/2` (which Page runs on) performs exact,
+generation-safe release before `:disconnect`/`handle_disconnect/1`, and stale
 replacement messages from a reused keep-alive process cannot stop a newer
-stream.
+stream. Only a loop that must own its `receive` should drop to
+`Dstar.start_stream/2`: check `conn.halted` before subscribing and call
+`Dstar.Utility.StreamRegistry.release(conn)` in `after` — takeover and adapter
+messages are then the loop's problem.
 
 ## CSRF Setup
 

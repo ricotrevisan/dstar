@@ -47,8 +47,11 @@ defmodule Dstar do
   never starts an undeduplicated keyed stream. Missing/invalid `tabId` is the
   intentional unkeyed fallback.
 
-  Hand-rolled loops must check `conn.halted` before subscribing/looping and
-  call `Dstar.Utility.StreamRegistry.release(conn)` during teardown. See that
+  Prefer `Dstar.Stream.open/2` with `key:` in plain controllers — it returns
+  `{:ok, conn}` / `{:error, conn}` and `Dstar.Stream.run/2` handles takeover and
+  release. Hand-rolled loops that own their `receive` must check `conn.halted`
+  before subscribing/looping and call
+  `Dstar.Utility.StreamRegistry.release(conn)` during teardown. See that
   module's docs for setup. Pass `max_bytes: n` as a third argument to bound
   raw/query signal input per call.
 

@@ -169,6 +169,7 @@ All functions in `Dstar` module:
 ### Connection
 
 - **`Dstar.start(conn)`** — Opens SSE connection (chunked, text/event-stream)
+- **`Dstar.Stream.open(conn, opts \\ [])` / `Dstar.Stream.run(conn, opts \\ [])`** — Opens a (optionally `key:`-deduplicated) stream and owns its receive loop via `:connect`/`:info`/`:replaced`/`:disconnect` callbacks; preferred for plain controllers
 - **`Dstar.start_stream(conn, scope_key, opts \\ [])`** — Atomically claims a per-tab keyed stream, or returns a halted non-SSE 503 on keyed claim failure; missing/invalid `tabId` is the intentional unkeyed fallback
 - **`Dstar.check_connection(conn)`** — Tests if SSE connection is still open. Returns `{:ok, conn}` if active, `{:error, conn}` if closed. Useful for detecting disconnections in streaming loops
 
@@ -260,28 +261,38 @@ a Datastar expression by hand when either value contains data.
 
 ```elixir
 def stream(conn, _params) do
-  Phoenix.PubSub.subscribe(MyApp.PubSub, "topic")
-  conn = Dstar.start(conn)
-  loop(conn)
-end
+  case Dstar.Stream.open(conn) do
+    {:ok, conn} ->
+      Dstar.Stream.run(conn,
+        connect: fn conn ->
+          Phoenix.PubSub.subscribe(MyApp.PubSub, "topic")
+          conn
+        end,
+        info: fn {:update, data}, conn -> Dstar.patch_signals(conn, %{data: data}) end
+      )
 
-defp loop(conn) do
-  receive do
-    {:update, data} ->
-      conn = Dstar.patch_signals(conn, %{data: data})
-      loop(conn)
+    {:error, conn} ->
+      conn
   end
 end
 ```
 
+`Dstar.Stream.run/2` owns the receive loop: `:info` returns the conn or
+`{:halt, conn}`, `:disconnect` runs once at the end, and adapter/takeover
+messages (e.g. Bandit's HTTP/2 flow control) are handled for you.
+`Dstar.start/1` plus a hand-written `receive` remains supported as the
+lower-level path when a loop must own its `receive`.
+
 For optional per-tab deduplication, supervise
 `Dstar.Utility.StreamRegistry`, provide a `data-signals:tab-id` backed by
-`sessionStorage`, and use `Dstar.start_stream/2`. Check `conn.halted` before
-subscribing/looping: a valid keyed claim failure is a normal non-SSE 503 and
-fails closed, while a missing/invalid `tabId` intentionally starts unkeyed.
-Claims are linearizable; release hand-rolled loops with
-`Dstar.Utility.StreamRegistry.release(conn)` in an `after` block. Pages do this
-automatically when `stream_key/1` is defined, before `handle_disconnect/1`.
+`sessionStorage`, and pass `key:` to `Dstar.Stream.open/2`. `{:error, conn}`
+means a plain HTTP 400/413/503 — never subscribe on it. A valid keyed claim
+failure fails closed, while a missing/invalid `tabId` intentionally starts
+unkeyed. Claims are linearizable; `run/2` releases the exact claim before
+`:disconnect` and on any raise, and `Dstar.Page` (which runs on it) does the
+same before `handle_disconnect/1` when `stream_key/1` is defined. The
+lower-level `Dstar.start_stream/2` path must check `conn.halted` and call
+`Dstar.Utility.StreamRegistry.release(conn)` in an `after` block.
 
 Client reconnection:
 ```heex

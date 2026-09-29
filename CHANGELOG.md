@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- **`Dstar.Stream` — the stream loop for plain controllers.** `open/2`
+  starts SSE, optionally claiming a per-tab `key:` first, and returns
+  `{:ok, conn}` or `{:error, conn}` with an ordinary 400/413/503 response
+  (never SSE). `run/2` owns the receive loop through `:connect`, `:info`,
+  `:replaced`, `:disconnect`, and `:idle_check` options. It recognizes only
+  its own generation-tagged takeover signal, releases the claim before
+  `:replaced`/`:disconnect` and on any raise, skips `{:plug_conn, :sent}`,
+  and leaves Bandit's HTTP/2 flow-control messages for Bandit, which a
+  catch-all `receive` would swallow. `Dstar.Page` streams now run on it with
+  unchanged behaviour. `Dstar.start_stream/2,3` and
+  `StreamRegistry.release/1` remain supported for loops that own their
+  `receive`.
+
 ### Security
 
 - **StreamRegistry claims and takeovers are now linearizable and fail closed
