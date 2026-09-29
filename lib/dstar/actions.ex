@@ -20,7 +20,7 @@ defmodule Dstar.Actions do
 
   A `:prefix`, when supplied to a module form, must be a local absolute
   application path: it starts with one `/` and contains no dot segment,
-  backslash, query, fragment, or control character.
+  backslash, query, fragment, or control character. `""` means no prefix.
 
   """
 
@@ -70,7 +70,7 @@ defmodule Dstar.Actions do
       `"/my-workspace"`). Only for the module form; relative, protocol-relative,
       cross-origin, dot-segment, query, fragment, backslash, and
       control-containing values are rejected; percent escapes must decode as
-      valid UTF-8.
+      valid UTF-8. `""` is the same as omitting it.
     - `:module` — literal module override. Only for the dynamic form. Without
       it, the `$_dstar_module` signal is read and encoded at runtime.
 
@@ -239,6 +239,9 @@ defmodule Dstar.Actions do
       verb: String.to_existing_atom(verb)
     )
   end
+
+  # An empty prefix means "mounted at the root", the same as omitting it.
+  defp validate_prefix!(""), do: ""
 
   defp validate_prefix!(prefix) when is_binary(prefix) do
     decoded = URI.decode(prefix)

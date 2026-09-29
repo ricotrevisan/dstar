@@ -121,7 +121,6 @@ defmodule Dstar.ActionsTest do
             "//evil.test",
             "https://evil.test",
             "relative",
-            "",
             "/x?y",
             "/x#y",
             "/\\evil",
@@ -147,6 +146,7 @@ defmodule Dstar.ActionsTest do
                ~S|@post("/workspace/ds/string/save")|
 
       assert Actions.post(String, "save", prefix: "/") == Actions.post(String, "save")
+      assert Actions.post(String, "save", prefix: "") == Actions.post(String, "save")
 
       assert Actions.post(String, "save", prefix: "/caf%C3%A9") ==
                ~S|@post("/caf%C3%A9/ds/string/save")|
