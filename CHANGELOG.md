@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- **Page callbacks share one crash policy.** A raise in `handle_event/3`,
+  `handle_connect/2` or `handle_info/2` is logged and re-raised, and with
+  `config :dstar, debug_errors: true` it is also relayed to the browser
+  console. Previously `handle_event/3` crashes were not logged by Dstar, and
+  stream crashes were never relayed to the console. Event and stream POSTs
+  now share one path for reading signals and running `authorize/2`.
+
 ## 0.3.0 — 2026-09-29
 
 ### Upgrading from 0.2

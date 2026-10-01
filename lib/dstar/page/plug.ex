@@ -20,6 +20,10 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     oversized payloads return 413. `mount/2` does not run on event or stream
     POSTs.
 
+    A raise in `handle_event/3`, `handle_connect/2` or `handle_info/2` is
+    logged and re-raised. With `config :dstar, debug_errors: true` (dev only)
+    it is also relayed to the browser console over the open stream.
+
     All control flow lives here as plain functions — pages contain only
     callbacks.
     """
@@ -74,8 +78,6 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     # ── POST _event/:event: read signals, authorize, start SSE, handle_event
 
     defp event(conn, page) do
-      conn = fetch_query_params(conn)
-
       event =
         conn.path_params["event"] ||
           raise(
@@ -83,72 +85,47 @@ if Code.ensure_loaded?(Phoenix.Controller) do
             "missing :event path param — route the event POST with an `:event` segment"
           )
 
-      case Dstar.Signals.fetch(conn, max_bytes: page.__dstar__(:max_signal_bytes)) do
-        {:ok, signals, conn} ->
-          conn = maybe_authorize(conn, page, {:event, event})
-
-          if response_committed?(conn) do
-            conn
-          else
-            conn = Dstar.SSE.start(conn)
-            dispatch_event(conn, page, event, signals)
-          end
-
-        {:error, reason, conn} ->
-          Dstar.Signals.send_error(conn, reason)
-      end
-    end
-
-    defp dispatch_event(conn, page, event, signals) do
-      if Application.get_env(:dstar, :debug_errors, false) do
-        try do
-          page.handle_event(conn, event, signals)
-        rescue
-          exception ->
-            stacktrace = __STACKTRACE__
-
-            # Best-effort: if the conn died mid-stream, console_log raising
-            # here would shadow the original exception.
-            try do
-              Dstar.console_log(
-                conn,
-                Exception.format(:error, exception, stacktrace),
-                level: :error
-              )
-            rescue
-              _ -> :ok
-            end
-
-            reraise exception, stacktrace
-        end
-      else
-        page.handle_event(conn, event, signals)
-      end
+      before_sse(conn, page, fn _conn -> {:event, event} end, fn conn, signals ->
+        conn = Dstar.SSE.start(conn)
+        guard(page, :handle_event, conn, fn -> page.handle_event(conn, event, signals) end)
+      end)
     end
 
     # ── POST stream: connect, then library-owned receive loop ───────────
 
     defp stream(conn, page) do
       if exported?(page, :handle_connect, 2) do
-        conn = fetch_query_params(conn)
-
-        case Dstar.Signals.fetch(conn, max_bytes: page.__dstar__(:max_signal_bytes)) do
-          {:ok, _signals, conn} ->
-            conn = maybe_authorize(conn, page, {:stream, conn.params})
-
-            if response_committed?(conn) do
-              conn
-            else
-              open_stream(conn, page)
-            end
-
-          {:error, reason, conn} ->
-            Dstar.Signals.send_error(conn, reason)
-        end
+        before_sse(conn, page, &{:stream, &1.params}, fn conn, _signals ->
+          open_stream(conn, page)
+        end)
       else
         conn
         |> put_resp_content_type("text/plain")
         |> send_resp(404, "Not found")
+      end
+    end
+
+    # ── Shared pre-SSE pipeline for event and stream POSTs ──────────────
+
+    # Reads signals within the page's limit, answering malformed (400) or
+    # oversized (413) payloads as plain HTTP. Then runs authorize/2 with the
+    # action `authorize_as` builds from the signal-bearing conn. `start` runs
+    # only if no response was committed, so a rejected request never sees SSE.
+    defp before_sse(conn, page, authorize_as, start) do
+      conn = fetch_query_params(conn)
+
+      case Dstar.Signals.fetch(conn, max_bytes: page.__dstar__(:max_signal_bytes)) do
+        {:ok, signals, conn} ->
+          conn = maybe_authorize(conn, page, authorize_as.(conn))
+
+          if response_committed?(conn) do
+            conn
+          else
+            start.(conn, signals)
+          end
+
+        {:error, reason, conn} ->
+          Dstar.Signals.send_error(conn, reason)
       end
     end
 
@@ -178,11 +155,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     end
 
     defp connect(conn, page) do
-      page.handle_connect(conn, conn.params)
-    rescue
-      exception ->
-        log_crash(page, :handle_connect, exception, __STACKTRACE__)
-        reraise exception, __STACKTRACE__
+      guard(page, :handle_connect, conn, fn -> page.handle_connect(conn, conn.params) end)
     end
 
     # Streaming pages need handle_connect/2 but not handle_info/2, so this
@@ -243,13 +216,36 @@ if Code.ensure_loaded?(Phoenix.Controller) do
 
           conn
         else
-          log_crash(page, :handle_info, exception, __STACKTRACE__)
-          reraise exception, __STACKTRACE__
+          crash(page, :handle_info, conn, exception, __STACKTRACE__)
         end
 
       exception ->
-        log_crash(page, :handle_info, exception, __STACKTRACE__)
-        reraise exception, __STACKTRACE__
+        crash(page, :handle_info, conn, exception, __STACKTRACE__)
+    end
+
+    # One crash policy for every callback that runs on an open SSE stream:
+    # log it, relay it to the browser console when `debug_errors` is set,
+    # then re-raise so the adapter ends the request.
+    defp guard(page, callback, conn, fun) do
+      fun.()
+    rescue
+      exception -> crash(page, callback, conn, exception, __STACKTRACE__)
+    end
+
+    defp crash(page, callback, conn, exception, stacktrace) do
+      log_crash(page, callback, exception, stacktrace)
+
+      if Application.get_env(:dstar, :debug_errors, false) do
+        # Best-effort: if the conn died mid-stream, console_log raising
+        # here would shadow the original exception.
+        try do
+          Dstar.console_log(conn, Exception.format(:error, exception, stacktrace), level: :error)
+        rescue
+          _ -> :ok
+        end
+      end
+
+      reraise exception, stacktrace
     end
 
     defp log_crash(page, callback, exception, stacktrace) do
