@@ -394,6 +394,19 @@ defmodule Dstar.Page.PlugTest do
         PagePlug.call(conn, PagePlug.init({:event, CounterPage}))
       end
     end
+
+    test "a handle_event crash is logged and re-raised" do
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          assert_raise FunctionClauseError, fn ->
+            PagePlug.call(event_conn("explode", %{}), PagePlug.init({:event, CounterPage}))
+          end
+        end)
+
+      assert log =~ "Dstar.Page.Plug: Dstar.Page.PlugTest.CounterPage.handle_event raised"
+    end
   end
 
   describe "stream action (POST)" do

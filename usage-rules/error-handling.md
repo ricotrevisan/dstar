@@ -376,7 +376,9 @@ end
 
 ---
 
-## 4. Dispatch-Level Error Handling
+## 4. Page and Dispatch Error Handling
+
+`Dstar.Page` callbacks (`handle_event/3`, `handle_connect/2`, `handle_info/2`) that raise are logged and re-raised. Set `config :dstar, debug_errors: true` in `dev.exs` to also see the exception in the browser console.
 
 `Dstar.Plugs.Dispatch` lets crashes bubble up. Use Phoenix's error handling (ErrorView) or a custom plug for catch-all.
 
