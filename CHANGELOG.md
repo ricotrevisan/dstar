@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 — 2026-10-04
+
 ### Changed
 
 - **Page callbacks share one crash policy.** A raise in `handle_event/3`,
