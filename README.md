@@ -829,6 +829,7 @@ Community-built libraries and resources that work with Dstar. These are maintain
 
 - [Rocket](https://data-star.dev/reference/rocket) — Datastar's web-component API (MIT, formerly Datastar Pro), by the [Star Federation](https://github.com/starfederation). Reach for it when a control needs real client-side state; plain Dstar signals and `Dstar.Component` cover the rest.
 - [Starbase](https://starbase.zweiundeins.gmbh/) — a community gallery of copy-and-paste Rocket components by [@zweiundeins](https://github.com/zweiundeins), in case one already exists for what you're building.
+- [PD rockets](https://derekr.github.io/pd-rockets/documentation/index.html) — vendorable [Rocket](https://data-star.dev/reference/rocket) components for drag-and-drop surfaces (kanban, sortable lists, bento grid, file tree) and contextual menus, by [@derekr](https://github.com/derekr). Backend-neutral; point its semantic events at any backend, Dstar included. Early and evolving (Beerware).
 
 Building something on Dstar? Open an issue and we'll add it here.
 
