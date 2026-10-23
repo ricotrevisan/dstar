@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Security
+
+- **Bumped `plug_crypto` to 2.2.1** in the lockfile for
+  [CVE-2026-105963](https://github.com/elixir-plug/plug/security/advisories/GHSA-ffw9-w85g-f2vh)
+  (secret key base exposed in stack-trace arguments when a wrong-typed
+  token reaches `Plug.Crypto`). `plug` 1.20.3 is already outside the
+  affected 1.6.3–1.6.4 range. Also bumped `phoenix` to 1.8.16,
+  `phoenix_live_view` to 1.2.13 and `phoenix_pubsub` to 2.4.1 (routine
+  patch releases, no known advisories).
+- **`Dstar.Plugs.RenameCsrfParam` only copies binary token values.** A
+  `csrf` signal of any other type — `nil`, a list (`?csrf[]=x`), a number
+  or object from a JSON body — is ignored instead of written into
+  `body_params["_csrf_token"]`, so request-controlled wrong-typed
+  arguments never reach `Plug.Crypto` call paths under
+  `Plug.CSRFProtection`. A non-binary token now behaves like a missing
+  token and fails validation with the ordinary invalid-CSRF-token error.
+  Previously a `nil` signal was copied through. No valid-token request
+  changes behavior.
+
 ## 0.3.1 — 2026-10-04
 
 ### Changed
