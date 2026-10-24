@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.2 — 2026-10-24
+
 ### Security
 
 - **Bumped `plug_crypto` to 2.2.1** in the lockfile for
