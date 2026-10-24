@@ -140,7 +140,7 @@ defmodule Dstar.Plugs.RenameCsrfParamTest do
       assert result.body_params["password"] == "secret"
     end
 
-    test "handles nil source param value", %{opts: opts} do
+    test "ignores a nil source param value", %{opts: opts} do
       conn =
         conn(:post, "/test")
         |> Map.put(:params, %{"csrf" => nil})
@@ -148,8 +148,78 @@ defmodule Dstar.Plugs.RenameCsrfParamTest do
 
       result = RenameCsrfParam.call(conn, opts)
 
-      # Should copy nil value
-      assert result.body_params["_csrf_token"] == nil
+      # Non-binary tokens are ignored (CVE-2026-105963 hardening): the
+      # request fails CSRF validation like a missing token instead of
+      # `Plug.Crypto` receiving a wrong-typed argument.
+      refute Map.has_key?(result.body_params, "_csrf_token")
+      assert result == conn
+    end
+
+    test "ignores a list source param value (`csrf[]=x`)", %{opts: opts} do
+      conn =
+        conn(:post, "/test")
+        |> Map.put(:params, %{"csrf" => ["x"]})
+        |> Map.put(:body_params, %{"csrf" => ["x"]})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      refute Map.has_key?(result.body_params, "_csrf_token")
+      assert result == conn
+    end
+
+    test "ignores non-binary source tokens from a JSON body (number, map)", %{opts: opts} do
+      for token <- [123, %{"evil" => true}] do
+        conn =
+          conn(:post, "/test")
+          |> Map.put(:params, %{"csrf" => token})
+          |> Map.put(:body_params, %{"csrf" => token})
+
+        result = RenameCsrfParam.call(conn, opts)
+
+        refute Map.has_key?(result.body_params, "_csrf_token")
+        assert result == conn
+      end
+    end
+
+    test "ignores an empty binary source param value", %{opts: opts} do
+      conn =
+        conn(:post, "/test")
+        |> Map.put(:params, %{"csrf" => ""})
+        |> Map.put(:body_params, %{"csrf" => ""})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      refute Map.has_key?(result.body_params, "_csrf_token")
+      assert result == conn
+    end
+
+    test "ignores a non-binary token inside the datastar param", %{opts: opts} do
+      conn =
+        conn(:get, "/test?datastar=%7B%22csrf%22%3A%5B%22x%22%5D%7D")
+        |> Map.put(:query_params, %{"datastar" => ~s({"csrf":["x"]})})
+        |> Map.put(:params, %{"datastar" => ~s({"csrf":["x"]})})
+        |> Map.put(:body_params, %{})
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      refute Map.has_key?(result.body_params, "_csrf_token")
+      assert result == conn
+    end
+
+    test "non-binary body token does not suppress a datastar token", %{opts: opts} do
+      # A body `csrf` of the wrong type must behave like a missing token:
+      # precedence continues with the next documented source.
+      conn =
+        split_conn(
+          :post,
+          "/test",
+          %{"datastar" => ~s({"csrf":"ds-token"})},
+          %{"csrf" => ["x"]}
+        )
+
+      result = RenameCsrfParam.call(conn, opts)
+
+      assert result.body_params["_csrf_token"] == "ds-token"
     end
 
     test "handles token with special characters", %{opts: opts} do

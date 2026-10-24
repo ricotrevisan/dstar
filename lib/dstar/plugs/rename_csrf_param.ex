@@ -30,6 +30,14 @@ defmodule Dstar.Plugs.RenameCsrfParam do
   The plug checks both channels, so one setup covers page `event()` POSTs,
   stream `connect()` POSTs, component events, and all verb helpers.
 
+  Only **binary** values count as tokens. If a source carries any other
+  type (`nil`, a list from `csrf[]=x`, a number or object from a JSON
+  body), that source is skipped and the next one is considered — so a
+  malformed signal behaves like a missing token and `Plug.CSRFProtection`
+  rejects the request with its ordinary invalid-token error. This keeps
+  request-controlled arguments of the wrong type out of the crypto code
+  paths (see CVE-2026-105963's guidance on typed arguments to `Plug.Crypto`).
+
   ## Token source precedence
 
   This plug only writes `body_params["_csrf_token"]` when that key is
@@ -103,19 +111,21 @@ defmodule Dstar.Plugs.RenameCsrfParam do
       %{"_csrf_token" => _} ->
         conn
 
-      %{^from => token} ->
-        put_csrf_token(conn, token)
-
       _ ->
-        case datastar_token(conn.params, datastar_param, from) do
-          {:ok, token} ->
-            put_csrf_token(conn, token)
+        datastar_value =
+          case datastar_token(conn.params, datastar_param, from) do
+            {:ok, token} ->
+              token
 
-          :error ->
-            case conn.params do
-              %{^from => token} -> put_csrf_token(conn, token)
-              _ -> conn
-            end
+            :error ->
+              :missing
+          end
+
+        [conn.body_params[from], datastar_value, conn.params[from]]
+        |> Enum.find(:missing, &is_token/1)
+        |> case do
+          token when is_binary(token) -> put_csrf_token(conn, token)
+          :missing -> conn
         end
     end
   end
@@ -138,6 +148,15 @@ defmodule Dstar.Plugs.RenameCsrfParam do
         :error
     end
   end
+
+  # Only a nonempty binary is a plausible CSRF token. Anything else (nil,
+  # list, number, map) is request-controlled garbage — e.g. `csrf[]=x`
+  # yields a list and a JSON body `{"csrf": null}` yields nil — and the
+  # source is skipped, leaving the next one to be considered, so a
+  # wrong-typed argument never reaches `Plug.CSRFProtection` (and,
+  # underneath it, `Plug.Crypto`). (CVE-2026-105963 hardening.)
+  defp is_token(token) when is_binary(token) and token != "", do: true
+  defp is_token(_token), do: false
 
   defp put_csrf_token(conn, token) do
     %{conn | body_params: Map.put(conn.body_params, "_csrf_token", token)}

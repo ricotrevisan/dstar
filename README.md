@@ -761,6 +761,12 @@ query-string `_csrf_token` is not a source and does not hide a valid body
 or `datastar` token. `Plug.CSRFProtection` then checks the body token
 first, then the `x-csrf-token` header.
 
+Only binary values are treated as tokens. If the `csrf` signal carries
+any other type — `nil`, a list (`?csrf[]=x`), a number from a JSON body —
+the plug ignores it, and `Plug.CSRFProtection` fails the request with its
+usual invalid-token error instead of `Plug.Crypto` seeing a wrong-typed
+argument (the pattern CVE-2026-105963 hardened).
+
 #### CSRF is not optional for cookie-authenticated mutations
 
 Session and auth checks identify the victim; they do not prove who

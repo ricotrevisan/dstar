@@ -390,7 +390,7 @@ end
 
 Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and the verb helpers.
 
-The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`.
+The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`. Only binary values are treated as tokens; anything else (nil, list, number) is ignored so wrong-typed request data never reaches the crypto paths (see CVE-2026-105963).
 
 Cookie-authenticated state-changing routes need a real CSRF defense — normally this plug plus `:protect_from_forgery`, or an `x-csrf-token` header (strongest hygiene: the token never lands in a URL), or a deliberately implemented Origin / Fetch-Metadata policy. Session/auth checks and SameSite cookies identify the victim; they do not prove who initiated the request.
 
