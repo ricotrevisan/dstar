@@ -377,8 +377,8 @@ end
 
 `:connect` runs once after SSE starts, `:info` gets every application message
 (return `{:halt, conn}` to end the stream), and `:disconnect` runs once when
-the client goes away — idle streams are probed every `:idle_check` ms
-(default 30s). `run/2` also handles the adapter and takeover messages a
+the client goes away — the connection is probed every `:idle_check` ms
+(default 30s), however many messages arrive in between. `run/2` also handles the adapter and takeover messages a
 hand-written `receive` easily gets wrong, such as leaving Bandit's HTTP/2
 flow-control messages alone.
 

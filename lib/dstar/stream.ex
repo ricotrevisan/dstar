@@ -110,8 +110,8 @@ defmodule Dstar.Stream do
     `message` is `{:EXIT, pid, :replaced}`.
   - `:disconnect` — `(conn -> any)`, called once when the loop ends for any
     reason other than a raise.
-  - `:idle_check` — ms without messages before probing the connection
-    (default #{@default_idle_check}).
+  - `:idle_check` — the connection is probed at least this often, in ms
+    (default #{@default_idle_check}). Messages do not postpone the probe.
   """
   @spec run(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def run(%Plug.Conn{} = conn, opts \\ []) do
@@ -125,19 +125,45 @@ defmodule Dstar.Stream do
     connect = Keyword.get(opts, :connect, & &1)
 
     try do
-      conn |> connect.() |> loop(callbacks)
+      conn |> connect.() |> loop(callbacks, probe_deadline(callbacks))
     after
       # Idempotent: a normal exit already released in teardown/2.
       StreamRegistry.release(conn)
     end
   end
 
-  defp loop(conn, callbacks) do
+  # The probe runs on an absolute deadline, not "idle_check ms after the
+  # last message": a steady flow of messages the app ignores (filtered
+  # PubSub traffic) would otherwise postpone it forever and keep a stream
+  # whose client is gone alive. The deadline is checked before every
+  # receive, so a mailbox that is never empty cannot starve it either.
+  defp loop(conn, callbacks, probe_at) do
+    timeout = probe_at - now()
+
+    if timeout <= 0 do
+      probe(conn, callbacks)
+    else
+      await(conn, callbacks, probe_at, timeout)
+    end
+  end
+
+  defp probe(conn, callbacks) do
+    case Dstar.SSE.check_connection(conn) do
+      {:ok, conn} -> loop(conn, callbacks, probe_deadline(callbacks))
+      {:error, conn} -> teardown(conn, callbacks)
+    end
+  end
+
+  defp probe_deadline(%{idle_check: idle_check}), do: now() + idle_check
+
+  defp now, do: System.monotonic_time(:millisecond)
+
+  defp await(conn, callbacks, probe_at, timeout) do
     receive do
       # Plug adapters notify the conn owner when the response is sent;
       # this is internal plumbing, never an application message.
       {:plug_conn, :sent} ->
-        loop(conn, callbacks)
+        loop(conn, callbacks, probe_at)
 
       # The coordinator tags replacement signals with the exact claim
       # generation. A matching signal ends this stream; a stale generation
@@ -153,14 +179,14 @@ defmodule Dstar.Stream do
           |> unwrap_halt()
           |> teardown(callbacks)
         else
-          loop(conn, callbacks)
+          loop(conn, callbacks, probe_at)
         end
 
       # Pre-generation replacement messages can only be stale after this
       # implementation is running. Ignore them rather than poisoning the
       # next request on a keep-alive connection.
       {:EXIT, _pid, :replaced} ->
-        loop(conn, callbacks)
+        loop(conn, callbacks, probe_at)
 
       # Bandit's HTTP/2 stream consumes its own two-tuple flow-control
       # messages by selective receive inside the send path. Leave them in
@@ -168,14 +194,10 @@ defmodule Dstar.Stream do
       msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
         case callbacks.info.(msg, conn) do
           {:halt, conn} -> teardown(conn, callbacks)
-          conn -> loop(conn, callbacks)
+          conn -> loop(conn, callbacks, probe_at)
         end
     after
-      callbacks.idle_check ->
-        case Dstar.SSE.check_connection(conn) do
-          {:ok, conn} -> loop(conn, callbacks)
-          {:error, conn} -> teardown(conn, callbacks)
-        end
+      timeout -> probe(conn, callbacks)
     end
   end
 
