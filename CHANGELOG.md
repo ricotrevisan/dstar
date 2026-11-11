@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.3 — 2026-11-11
+
 ### Security
 
 - **Crash logs no longer contain request data.** When a handler raised,
