@@ -264,7 +264,7 @@ This accepts JSON objects only, returns observable 400 errors for
 malformed/non-object input and 413 for oversized input, and threads the conn
 updated by every `Plug.Conn.read_body/2` call. GET/DELETE still use the
 `datastar` query parameter and enforce the same configured limit before
-decoding. Dstar Page and Dispatch perform this boundary automatically
+decoding; a DELETE without it reads its JSON body. Dstar Page and Dispatch perform this boundary automatically
 (default 1,000,000 bytes; configure `:max_signal_bytes`).
 
 **Key differences:**
@@ -575,7 +575,7 @@ Expose the token as a **non-prefixed** signal in your root layout:
 
 Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed.
 
-The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`.
+The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`. The plug skips GET/HEAD/OPTIONS (never CSRF-checked) and decodes `datastar` only when the body has no token, up to `:max_bytes`.
 
 Cookie-authenticated state-changing routes need a real CSRF defense — normally this plug plus `:protect_from_forgery`, or an `x-csrf-token` header (strongest hygiene: the token never lands in a URL), or a deliberately implemented Origin / Fetch-Metadata policy. Session/auth checks and SameSite cookies identify the victim; they do not prove who initiated the request.
 

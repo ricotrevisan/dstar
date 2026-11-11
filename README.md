@@ -322,8 +322,9 @@ end
 ```
 
 Always thread the returned conn; `Plug.Conn.read_body/2` updates adapter/body
-state. GET and DELETE use the `datastar` query parameter and enforce the same
-configured byte limit before JSON decoding. Missing signals and an empty raw
+state. GET uses the `datastar` query parameter; DELETE uses it when present
+and otherwise the JSON body (Datastar clients after v1.0 send one). The query
+path enforces the same configured byte limit before JSON decoding. Missing signals and an empty raw
 body mean `%{}`; an explicitly empty `datastar=` value is malformed.
 
 ### Safe action URL values
@@ -751,7 +752,11 @@ The plug copies the token into `body_params["_csrf_token"]` from either
 channel, where `Plug.CSRFProtection` looks. This one setup covers page
 `event()` POSTs, stream `connect()` POSTs, component events, and the verb
 helpers — including `Dstar.delete/2,3`, which `:protect_from_forgery` does
-check.
+check. GET, HEAD and OPTIONS pass through untouched, since
+`Plug.CSRFProtection` never validates them, and so does a body no parser
+fetched (e.g. a `text/plain` POST). The `datastar` value is decoded only when
+the body has no token, and only up to `:max_bytes` — set it to your
+smallest `:max_signal_bytes` (`plug Dstar.Plugs.RenameCsrfParam, max_bytes: 64_000`).
 
 When more than one token is present, `RenameCsrfParam` only writes
 `body_params["_csrf_token"]` if that key is missing, in this order:

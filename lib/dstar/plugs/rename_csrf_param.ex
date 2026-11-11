@@ -45,7 +45,7 @@ defmodule Dstar.Plugs.RenameCsrfParam do
 
   1. Existing `body_params["_csrf_token"]` — left untouched (Phoenix forms).
   2. The source signal in `body_params` (default `csrf`) — POST/PUT/PATCH.
-  3. The same key inside the `datastar` query parameter — GET/DELETE.
+  3. The same key inside the `datastar` **query** parameter — DELETE.
   4. A last-resort top-level `params` source key (not query `_csrf_token`).
 
   A query-string `_csrf_token` is **not** a source and does **not** suppress
@@ -89,65 +89,81 @@ defmodule Dstar.Plugs.RenameCsrfParam do
   - `:from` — Source param name to copy from. Default: `"csrf"`.
   - `:datastar_param` — Name of the Datastar query parameter that carries
     the signals JSON on GET/DELETE requests. Default: `"datastar"`.
+  - `:max_bytes` — Largest `datastar` query value the plug will decode.
+    Longer values are skipped (no token from that source). Default: the
+    same as `Dstar.Signals.fetch/2`.
+
+  GET, HEAD and OPTIONS pass through untouched (`Plug.CSRFProtection`
+  does not validate them), and so does a request whose body no parser
+  fetched.
   """
 
   @behaviour Plug
 
   @default_datastar_param "datastar"
 
+  # Plug.CSRFProtection never validates these, so there is nothing to copy.
+  @unprotected_methods ~w(GET HEAD OPTIONS)
+
   @impl Plug
   def init(opts) do
     %{
       from: Keyword.get(opts, :from, "csrf"),
-      datastar_param: Keyword.get(opts, :datastar_param, @default_datastar_param)
+      datastar_param: Keyword.get(opts, :datastar_param, @default_datastar_param),
+      max_bytes: Keyword.get(opts, :max_bytes, Dstar.Signals.default_max_bytes())
     }
   end
 
   @impl Plug
-  def call(conn, %{from: from, datastar_param: datastar_param}) do
-    # Plug.CSRFProtection reads body_params, not merged params. A query
-    # `_csrf_token` must not suppress a body or datastar source.
-    case conn.body_params do
-      %{"_csrf_token" => _} ->
-        conn
+  def call(%Plug.Conn{method: method} = conn, _opts) when method in @unprotected_methods,
+    do: conn
+
+  # No parser read the body (e.g. a `text/plain` POST passed through
+  # Plug.Parsers), so there is no `body_params` map to write into.
+  # Plug.CSRFProtection then falls back to the `x-csrf-token` header.
+  def call(%Plug.Conn{body_params: %Plug.Conn.Unfetched{}} = conn, _opts), do: conn
+
+  # Plug.CSRFProtection reads body_params, not merged params. A query
+  # `_csrf_token` must not suppress a body or datastar source.
+  def call(%Plug.Conn{body_params: %{"_csrf_token" => _}} = conn, _opts), do: conn
+
+  def call(conn, opts) do
+    # Sources are tried lazily, in precedence order, so the datastar JSON is
+    # only decoded when the body carries no token.
+    sources = [
+      fn -> conn.body_params[opts.from] end,
+      fn -> datastar_token(Plug.Conn.fetch_query_params(conn), opts) end,
+      fn -> params_token(conn, opts.from) end
+    ]
+
+    Enum.find_value(sources, conn, fn source ->
+      token = source.()
+      if is_token(token), do: put_csrf_token(conn, token)
+    end)
+  end
+
+  # The `datastar` query parameter carries the signals JSON on DELETE
+  # (Datastar v1.0 sends no body for it). Only the query string counts —
+  # a `datastar` key in a POST body is not a transport channel — and the
+  # value is size-checked before decoding, like `Dstar.Signals.fetch/2`.
+  defp datastar_token(%Plug.Conn{query_params: query}, opts) do
+    case Map.get(query, opts.datastar_param) do
+      json when is_binary(json) and byte_size(json) <= opts.max_bytes ->
+        case Jason.decode(json) do
+          {:ok, %{} = signals} -> Map.get(signals, opts.from)
+          _ -> nil
+        end
+
+      %{} = signals ->
+        Map.get(signals, opts.from)
 
       _ ->
-        datastar_value =
-          case datastar_token(conn.params, datastar_param, from) do
-            {:ok, token} ->
-              token
-
-            :error ->
-              :missing
-          end
-
-        [conn.body_params[from], datastar_value, conn.params[from]]
-        |> Enum.find(:missing, &is_token/1)
-        |> case do
-          token when is_binary(token) -> put_csrf_token(conn, token)
-          :missing -> conn
-        end
+        nil
     end
   end
 
-  # The `datastar` query parameter carries the signals JSON on GET/DELETE
-  # requests (Datastar v1.0 sends no body for those methods). Mirrors how
-  # `Dstar.Signals.read/1` decodes it.
-  defp datastar_token(params, datastar_param, from) do
-    case Map.get(params, datastar_param) do
-      json_string when is_binary(json_string) ->
-        case Jason.decode(json_string) do
-          {:ok, %{^from => token}} -> {:ok, token}
-          _ -> :error
-        end
-
-      %{^from => token} ->
-        {:ok, token}
-
-      _ ->
-        :error
-    end
-  end
+  defp params_token(%Plug.Conn{params: %Plug.Conn.Unfetched{}}, _from), do: nil
+  defp params_token(%Plug.Conn{params: params}, from), do: Map.get(params, from)
 
   # Only a nonempty binary is a plausible CSRF token. Anything else (nil,
   # list, number, map) is request-controlled garbage — e.g. `csrf[]=x`

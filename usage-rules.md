@@ -157,7 +157,7 @@ end
 
 Signal JSON must be an object. Malformed/non-object input is a 400; oversized
 input is a 413. Raw bodies and GET/DELETE `datastar` JSON use the same byte
-limit before decoding. Configure `Plug.Parsers` with bounded `:length` and
+limit before decoding (a DELETE without `datastar` reads its JSON body). Configure `Plug.Parsers` with bounded `:length` and
 `:read_length` (at or below Dstar's limit); after parsing, the original byte
 size is unavailable. Page and Dispatch default to 1,000,000 bytes and accept
 `:max_signal_bytes`.
@@ -228,7 +228,7 @@ plug :protect_from_forgery
 
 Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and the verb helpers. The plug safely no-ops when the param isn't present, so it's fine to use globally.
 
-The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`.
+The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`. The plug skips GET/HEAD/OPTIONS (never CSRF-checked) and decodes `datastar` only when the body has no token, up to `:max_bytes`.
 
 Cookie-authenticated state-changing routes need a real CSRF defense — normally this plug plus `:protect_from_forgery`, or an `x-csrf-token` header (strongest hygiene: the token never lands in a URL), or a deliberately implemented Origin / Fetch-Metadata policy. Session/auth checks and SameSite cookies identify the victim; they do not prove who initiated the request.
 
