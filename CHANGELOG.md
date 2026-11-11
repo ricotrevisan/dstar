@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- **Releases are published from CI with
+  [Hex Workload Identity](https://hex.pm/docs/workload-identity).** A tag
+  push runs `.github/workflows/release.yml`, which publishes with a
+  short-lived, package-scoped token instead of a stored API key. Each
+  release's Provenance card on hex.pm links to the commit and workflow run
+  that built it.
+
 ## 0.3.2 — 2026-10-24
 
 ### Security

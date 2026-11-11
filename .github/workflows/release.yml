@@ -1,0 +1,76 @@
+name: Release
+
+# Publishes to Hex with Workload Identity (no stored HEX_API_KEY):
+# https://hex.pm/docs/workload-identity
+# hex.pm trusts owner `ricotrevisan`, repo `dstar`, workflow `release.yml`,
+# environment `release`. Renaming this file or the environment breaks publishing.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Protection rules (required reviewer, tag pattern) live on this environment.
+    environment: release
+    permissions:
+      id-token: write # OIDC token that mix exchanges for a 15-minute Hex token
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      # Workload Identity needs OTP 27+ and Hex 2.6+.
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
+      - name: Check tag matches mix.exs version
+        run: |
+          version=$(sed -n 's/^  @version "\(.*\)"$/\1/p' mix.exs)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match mix.exs version $version"
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '
+            index($0, "## " v " ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::No '## $version' section in CHANGELOG.md"
+            exit 1
+          fi
+
+      - run: mix local.hex --force
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - run: mix test
+
+      # No HEX_API_KEY: a configured key would take precedence over Workload
+      # Identity. Expect "Authenticated with Workload Identity" in the log.
+      # Publishes the package and its docs.
+      - name: Publish to Hex
+        run: mix hex.publish --yes
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --verify-tag
