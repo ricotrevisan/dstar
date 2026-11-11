@@ -95,6 +95,10 @@ Behavior changes need matching updates in all of these, or CI/docs drift:
 - **Never commit `deps/`** — it was tracked once by mistake and untracked in
   `287ea40`. `doc/` is ExDoc build output; regenerate it with `mix docs`, don't
   edit it by hand. Both are gitignored.
-- Releases: bump `@version` in `mix.exs`, add a dated CHANGELOG section,
-  publish the package and docs, tag `vX.Y.Z`, and create the matching GitHub
-  Release.
+- Releases: bump `@version` in `mix.exs` and add a dated `## X.Y.Z — YYYY-MM-DD`
+  CHANGELOG section in a PR. After it merges, tag `vX.Y.Z` on `main` and push
+  the tag. `.github/workflows/release.yml` waits for approval in the `release`
+  environment, then publishes the package and docs with Hex Workload Identity
+  (no `HEX_API_KEY`) and creates the GitHub Release from the CHANGELOG
+  section. Don't publish by hand, and don't rename the workflow file or the
+  environment: hex.pm trusts those exact names.
