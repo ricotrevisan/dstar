@@ -75,6 +75,10 @@ jobs:
 
       - run: mix deps.get
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # No --with-deps: that apt-installs fonts from Ubuntu's mirrors, which the
+      # runner sometimes can't resolve. The runner image ships Google Chrome,
+      # so Chromium's shared libraries are present, and this test only
+      # evaluates JavaScript, so it needs no fonts.
+      - run: npx playwright install chromium
       - name: Evaluate emitted actions in Chromium
         run: mix test --only browser test/browser/action_url_browser_test.exs
