@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Security
+
+- **Crash logs no longer contain request data.** When a handler raised,
+  `Dstar.Plugs.Dispatch` and `Dstar.Page.Plug` logged the stacktrace as
+  is. For a `FunctionClauseError` (any unexpected event name or signal
+  shape) its top frame holds the call's arguments, so the log got the
+  whole conn and every signal: cookies, the `authorization` header, the
+  CSRF token, passwords. Both plugs now replace argument lists with
+  arities before logging, before the `debug_errors` console relay, and in
+  the re-raised stacktrace that error trackers see. The event name in the
+  Dispatch log line is truncated to 100 characters.
+- **The usage rules no longer teach an injectable pattern.** They showed
+  `data-signals:id={"'#{@id}'"}` as the way to pass a dynamic string and
+  called it escaping. Datastar evaluates the attribute as JavaScript, so a
+  `'` in the value ends the string and the rest runs. Every example now
+  uses the new `Dstar.js_value/1`. If you copied the old pattern for
+  anything other than an integer or the CSRF token, switch to it.
+- Bumped `phoenix_html` to 4.4.0 in the lockfile
+  (EEF-CVE-2026-117645, transitive via `phoenix_live_view`; dstar never
+  passes request-derived attribute names to it). CI now runs
+  `mix hex.audit`.
+
+### Added
+
+- **`Dstar.js_value/1`** (and `Dstar.Actions.js_value/1`) encodes any
+  value as a JavaScript literal for `data-signals:*` and other Datastar
+  expression attributes: JSON with `<`, `/`, U+2028/2029 and `$` escaped.
+
 ### Changed
 
 - **Releases are published from CI with

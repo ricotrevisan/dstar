@@ -303,5 +303,42 @@ defmodule Dstar.Plugs.DispatchTest do
       assert log =~ "RaisingHandler"
       assert log =~ "kaboom"
     end
+
+    test "crash logs and the re-raised stacktrace carry no request data" do
+      import ExUnit.CaptureLog
+
+      defmodule ClauseHandler do
+        def handle_event(conn, "login", %{"remember" => true}), do: conn
+      end
+
+      opts = Dispatch.init(modules: [ClauseHandler])
+      module_name = Dstar.Actions.encode_module(ClauseHandler)
+
+      conn =
+        conn(:post, "/ds/#{module_name}/login")
+        |> Plug.Conn.put_req_header("cookie", "_app_key=SESSION-COOKIE")
+        |> Plug.Conn.put_req_header("authorization", "Bearer API-TOKEN")
+        |> Map.put(:path_params, %{"module" => module_name, "event" => "login"})
+        |> Map.put(:body_params, %{"password" => "hunter2", "csrf" => "CSRF-TOKEN"})
+
+      log =
+        capture_log(fn ->
+          {_kind, _exception, stacktrace} =
+            try do
+              Dispatch.call(conn, opts)
+            catch
+              kind, exception -> {kind, exception, __STACKTRACE__}
+            end
+
+          refute Enum.any?(stacktrace, fn {_m, _f, args, _loc} -> is_list(args) end)
+        end)
+
+      assert log =~ "FunctionClauseError"
+      assert log =~ "ClauseHandler.handle_event/3"
+
+      for secret <- ["hunter2", "CSRF-TOKEN", "SESSION-COOKIE", "API-TOKEN"] do
+        refute log =~ secret
+      end
+    end
   end
 end

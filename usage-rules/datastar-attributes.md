@@ -60,10 +60,18 @@ rule applies to `data-bind:*` and every other keyed attribute.
 
 ### Dynamic Values with HEEx
 ```heex
-<!-- Inject Elixir values into JS expressions -->
-<div data-signals:user_id={"'#{@user.id}'"}>
-<div data-signals:count={"#{@initial_count}"}>
-<div data-signals:config={Jason.encode!(@config)}>
+<!-- Inject Elixir values into JS expressions with Dstar.js_value/1 -->
+<div data-signals:user_id={Dstar.js_value(@user.id)}>
+<div data-signals:count={Dstar.js_value(@initial_count)}>
+<div data-signals:config={Dstar.js_value(@config)}>
+```
+
+Never wrap interpolated data in hand-written JS quotes
+(`{"'#{@id}'"}`): a `'` in the value ends the string and the rest runs as
+code. HEEx escaping protects the HTML attribute, not the JavaScript
+expression Datastar evaluates.
+
+```heex
 ```
 
 ### Nested Signals
@@ -344,7 +352,7 @@ Run code when element mounts.
 <!-- Establish persistent SSE stream -->
 <!-- CSRF travels as a non-prefixed `csrf` signal (see CSRF setup in usage-rules.md) -->
 <div 
-  data-signals:csrf={"'#{Plug.CSRFProtection.get_csrf_token()}'"}
+  data-signals:csrf={Dstar.js_value(Plug.CSRFProtection.get_csrf_token())}
   data-init={~s|@post('#{~p"/stream"}', {retryMaxCount: Infinity})|}>
   App content
 </div>
@@ -781,7 +789,7 @@ not reconnect at all under the default `retry: "auto"`.
 ```heex
 <%!-- CSRF travels as a non-prefixed `csrf` signal (see CSRF setup in usage-rules.md) --%>
 <div 
-  data-signals:csrf={"'#{Plug.CSRFProtection.get_csrf_token()}'"}
+  data-signals:csrf={Dstar.js_value(Plug.CSRFProtection.get_csrf_token())}
   data-init={~s|@post('#{~p"/stream"}', {retryMaxCount: Infinity})|}>
   
   <div id="live-updates">
@@ -796,7 +804,7 @@ not reconnect at all under the default `retry: "auto"`.
 
 1. **Signal Naming:** Use underscore prefix (`_loading`, `_open`) for client-only signals
 2. **CSRF:** Datastar has no built-in CSRF handling — expose the token as a **non-prefixed** `csrf` signal and add `Dstar.Plugs.RenameCsrfParam` before `:protect_from_forgery`
-3. **HEEx Escaping:** Wrap JS strings in HEEx interpolation: `data-signals:id={"'#{@id}'"}`
+3. **Dynamic values:** Use `data-signals:id={Dstar.js_value(@id)}`. Never wrap data in hand-written JS quotes (`{"'#{@id}'"}`) — HEEx escaping does not stop a `'` from ending the string
 4. **Indicators:** Always use client-only signals for loading states
 5. **Debounce:** Default to 300ms for search, 500ms for expensive operations
 6. **SSE Streams:** Use `retryMaxCount: Infinity` for persistent connections

@@ -85,11 +85,15 @@ defmodule Dstar.Plugs.Dispatch do
     module.handle_event(conn, event, signals)
   rescue
     exception ->
+      # Scrubbed: raw frames would carry the conn and signals into the log
+      # and into whatever reports the re-raise (see Dstar.CrashReport).
+      stacktrace = Dstar.CrashReport.scrub(__STACKTRACE__)
+
       Logger.error(
-        "Dstar.Plugs.Dispatch: #{inspect(module)}.handle_event(#{inspect(event)}) raised:\n" <>
-          Exception.format(:error, exception, __STACKTRACE__)
+        "Dstar.Plugs.Dispatch: #{inspect(module)}.handle_event(#{inspect(event, printable_limit: 100)}) raised:\n" <>
+          Exception.format(:error, exception, stacktrace)
       )
 
-      reraise exception, __STACKTRACE__
+      reraise exception, stacktrace
   end
 end

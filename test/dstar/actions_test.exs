@@ -3,6 +3,8 @@ defmodule Dstar.ActionsTest do
 
   alias Dstar.Actions
 
+  doctest Dstar.Actions, only: [js_value: 1]
+
   # Define test modules so String.to_existing_atom works in decode_module
   defmodule MyApp.CounterView do
   end
@@ -184,6 +186,25 @@ defmodule Dstar.ActionsTest do
     test "delegates to post/3" do
       assert Actions.event(MyApp.CounterView, "save", prefix: "/ws") ==
                Actions.post(MyApp.CounterView, "save", prefix: "/ws")
+    end
+  end
+
+  describe "js_value/1" do
+    test "a quote in the value cannot end the literal" do
+      hostile = "x'+alert(document.domain)+'\"</script><!--$evil"
+      encoded = Actions.js_value(hostile)
+
+      # One string literal: every inner `"` is backslash-escaped.
+      assert encoded =~ ~r/\A"(?:[^"\\]|\\.)*"\z/
+      refute encoded =~ "<"
+      refute encoded =~ "$"
+      assert Jason.decode!(encoded) == hostile
+    end
+
+    test "round-trips non-string values" do
+      for value <- [42, 1.5, true, nil, [1, "a$"], %{"k" => "v</"}] do
+        assert value |> Actions.js_value() |> Jason.decode!() == value
+      end
     end
   end
 

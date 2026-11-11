@@ -407,6 +407,23 @@ defmodule Dstar.Page.PlugTest do
 
       assert log =~ "Dstar.Page.Plug: Dstar.Page.PlugTest.CounterPage.handle_event raised"
     end
+
+    test "a handle_event crash log carries no signals" do
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          assert_raise FunctionClauseError, fn ->
+            PagePlug.call(
+              event_conn("explode", %{"password" => "hunter2"}),
+              PagePlug.init({:event, CounterPage})
+            )
+          end
+        end)
+
+      assert log =~ "CounterPage.handle_event/3"
+      refute log =~ "hunter2"
+    end
   end
 
   describe "stream action (POST)" do

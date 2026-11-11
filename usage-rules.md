@@ -223,7 +223,7 @@ plug :protect_from_forgery
 ```
 
 ```heex
-<body data-signals:csrf={"'#{get_csrf_token()}'"}>
+<body data-signals:csrf={Dstar.js_value(get_csrf_token())}>
 ```
 
 Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and the verb helpers. The plug safely no-ops when the param isn't present, so it's fine to use globally.
@@ -340,7 +340,7 @@ Datastar signal values are JavaScript expressions:
 ```heex
 data-signals:count="0"           <%!-- Number --%>
 data-signals:name="''"           <%!-- Empty string (JS quotes needed) --%>
-data-signals:id={"'#{@id}'"}     <%!-- Dynamic string (HEEx + JS quotes) --%>
+data-signals:id={Dstar.js_value(@id)}  <%!-- Dynamic value: never hand-quote data --%>
 data-signals:active="false"      <%!-- Boolean --%>
 data-signals:items="[]"          <%!-- Array --%>
 data-signals:errors="{}"         <%!-- Object --%>

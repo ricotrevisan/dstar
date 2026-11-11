@@ -245,6 +245,14 @@ defmodule Dstar do
   defdelegate delete(module_or_name, name_or_opts \\ []), to: Dstar.Actions
   defdelegate delete(module, event_name, opts), to: Dstar.Actions
 
+  @doc """
+  Encodes a value as a JavaScript literal for a Datastar expression
+  attribute. See `Dstar.Actions.js_value/1`.
+
+      <div data-signals:user_name={Dstar.js_value(@user.name)}>
+  """
+  defdelegate js_value(value), to: Dstar.Actions
+
   @doc deprecated: "Use Dstar.post/2 (or get/put/patch/delete) instead"
   defdelegate event(module_or_name, name_or_opts), to: Dstar.Actions
   defdelegate event(module, event_name, opts), to: Dstar.Actions
