@@ -150,7 +150,7 @@ defmodule Dstar.Signals do
   """
   @spec patch_raw(Plug.Conn.t(), String.t(), keyword()) :: Plug.Conn.t()
   def patch_raw(conn, json, opts \\ []) when is_binary(json) do
-    SSE.send_event!(conn, @event_type, data_lines(json, opts), opts)
+    SSE.send_datastar!(conn, @event_type, data_lines(json, opts), opts)
   end
 
   @doc """
@@ -164,7 +164,7 @@ defmodule Dstar.Signals do
   """
   @spec format_patch(map(), keyword()) :: String.t()
   def format_patch(signals, opts \\ []) when is_map(signals) do
-    SSE.format_event(@event_type, data_lines(Jason.encode!(signals), opts), opts)
+    SSE.format_datastar(@event_type, data_lines(Jason.encode!(signals), opts), opts)
   end
 
   @doc """
@@ -285,7 +285,6 @@ defmodule Dstar.Signals do
     []
     |> maybe_add_only_if_missing(Keyword.get(opts, :only_if_missing, @default_only_if_missing))
     |> add_signals_data(json)
-    |> SSE.datastar_data()
   end
 
   defp send_input_error(conn, status, body) do

@@ -222,4 +222,27 @@ defmodule Dstar.SSETest do
       assert {:error, %Plug.Conn{}} = SSE.check_connection(conn)
     end
   end
+
+  describe "Datastar fast path" do
+    test "format_datastar/3 emits exactly the bytes of format_event(datastar_data(...))" do
+      pieces = ["a", "", "\n", "\r", "\r\n", "\n\n", " x ", "<div>", "é"]
+
+      for _ <- 1..300 do
+        value = fn -> Enum.map_join(1..Enum.random(0..6), "", fn _ -> Enum.random(pieces) end) end
+
+        fields = [
+          {"selector", value.()},
+          {"mode", value.()},
+          {"elements", value.()},
+          {"signals", value.()}
+        ]
+
+        opts = [event_id: Enum.random([nil, value.()]), retry: Enum.random([nil, 1000, 2500])]
+        type = Enum.random(["datastar-patch-elements", "ev" <> value.()])
+
+        assert Dstar.SSE.format_datastar(type, fields, opts) ==
+                 Dstar.SSE.format_event(type, Dstar.SSE.datastar_data(fields), opts)
+      end
+    end
+  end
 end
