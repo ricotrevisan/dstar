@@ -38,6 +38,17 @@
   `%{"_json" => ...}`; the plug's added `_csrf_token` made that a two-key
   map that was accepted as signals.
 
+- **A stream whose client is gone no longer lives on while messages keep
+  arriving.** `Dstar.Stream.run/2` (and so every `Dstar.Page` stream)
+  restarted its `:idle_check` timer on every message, so a steady flow of
+  messages the app ignores (filtered PubSub traffic) postponed the
+  liveness probe forever. The probe now runs on a fixed deadline: at
+  least every `:idle_check` ms, however busy the mailbox.
+- **`Dstar.Utility.StreamRegistry` survives a stray message** instead of
+  crashing and dropping every claim, and `unregister_self/0` looks up the
+  caller's claims in an index instead of scanning all of them inside the
+  coordinator.
+
 ### Added
 
 - **`Dstar.js_value/1`** (and `Dstar.Actions.js_value/1`) encodes any

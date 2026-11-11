@@ -40,7 +40,8 @@ def stream(conn, _params) do
 end
 ```
 
-`run/2` probes idle connections every `:idle_check` ms (default 30_000) and
+`run/2` probes the connection every `:idle_check` ms (default 30_000), even
+while messages keep arriving, and
 skips adapter plumbing — including Bandit's HTTP/2 flow-control messages,
 which a catch-all `receive` would swallow and stall the stream.
 

@@ -85,7 +85,9 @@ defmodule Dstar.Utility.StreamRegistry do
       raise ArgumentError, ":grace_ms must be a positive integer"
     end
 
-    {:ok, %{active: %{}, claims: %{}, monitors: %{}, grace_ms: grace_ms}}
+    # `owned` indexes claim tokens by owner pid so `unregister_self/0` does
+    # not scan every claim inside the coordinator.
+    {:ok, %{active: %{}, claims: %{}, monitors: %{}, owned: %{}, grace_ms: grace_ms}}
   end
 
   @doc """
@@ -313,7 +315,8 @@ defmodule Dstar.Utility.StreamRegistry do
           state
           | active: Map.put(state.active, key, token),
             claims: Map.put(state.claims, token, claim_entry),
-            monitors: Map.put(state.monitors, monitor, token)
+            monitors: Map.put(state.monitors, monitor, token),
+            owned: Map.update(state.owned, pid, [token], &[token | &1])
         }
 
         {:reply, {:ok, token}, state}
@@ -331,10 +334,7 @@ defmodule Dstar.Utility.StreamRegistry do
   end
 
   def handle_call(:release, {pid, _tag}, state) do
-    tokens =
-      for {token, %{pid: claim_pid}} <- state.claims, claim_pid == pid, do: token
-
-    state = Enum.reduce(tokens, state, &drop_claim(&2, &1))
+    state = state.owned |> Map.get(pid, []) |> Enum.reduce(state, &drop_claim(&2, &1))
     {:reply, :ok, state}
   end
 
@@ -370,6 +370,10 @@ defmodule Dstar.Utility.StreamRegistry do
         {:noreply, state}
     end
   end
+
+  # Only same-node code can message the coordinator, but one stray message
+  # must not crash it and drop every claim.
+  def handle_info(_message, state), do: {:noreply, state}
 
   defp active_claim(state, key) do
     with {:ok, token} <- Map.fetch(state.active, key) do
@@ -408,11 +412,18 @@ defmodule Dstar.Utility.StreamRegistry do
             _other -> state.active
           end
 
+        owned =
+          case Map.fetch!(state.owned, claim_entry.pid) |> List.delete(token) do
+            [] -> Map.delete(state.owned, claim_entry.pid)
+            tokens -> Map.put(state.owned, claim_entry.pid, tokens)
+          end
+
         %{
           state
           | active: active,
             claims: claims,
-            monitors: Map.delete(state.monitors, claim_entry.monitor)
+            monitors: Map.delete(state.monitors, claim_entry.monitor),
+            owned: owned
         }
     end
   end

@@ -7,6 +7,14 @@ defmodule Dstar.StreamTest do
   alias Dstar.Stream
   alias Dstar.Utility.StreamRegistry
 
+  # A connection whose next write fails, like a socket the client closed.
+  defmodule ClosedAdapter do
+    def chunk(parent, data) do
+      send(parent, {:probe, IO.iodata_to_binary(data)})
+      {:error, :closed}
+    end
+  end
+
   defp keyed_conn(tab_id) do
     conn(:post, "/stream") |> Map.put(:body_params, %{"tabId" => tab_id})
   end
@@ -260,5 +268,45 @@ defmodule Dstar.StreamTest do
     assert StreamRegistry.owner({key, tab_id}) == :error
 
     Process.exit(pid, :kill)
+  end
+
+  describe "liveness probe" do
+    test "steady non-writing messages do not postpone the probe (audit A4)" do
+      parent = self()
+
+      stream =
+        spawn(fn ->
+          conn = %{conn(:post, "/stream") | state: :chunked, adapter: {ClosedAdapter, parent}}
+
+          Stream.run(conn,
+            idle_check: 40,
+            connect: connected(parent),
+            info: fn :noise, conn ->
+              send(parent, :handled)
+              conn
+            end,
+            disconnect: fn _conn -> send(parent, :disconnected) end
+          )
+        end)
+
+      assert_receive {:connected, ^stream}
+
+      # Messages every 5 ms for ~250 ms: before the fix each one restarted
+      # the 40 ms idle timer, so the closed connection was never probed.
+      ref = Process.monitor(stream)
+
+      Enum.reduce_while(1..50, :ok, fn _, acc ->
+        send(stream, :noise)
+
+        receive do
+          {:DOWN, ^ref, _, _, _} -> {:halt, acc}
+        after
+          5 -> {:cont, acc}
+        end
+      end)
+
+      assert_received {:probe, ": \n\n"}
+      assert_received :disconnected
+    end
   end
 end

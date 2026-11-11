@@ -420,4 +420,53 @@ defmodule Dstar.Utility.StreamRegistryTest do
       end
     end
   end
+
+  describe "coordinator robustness" do
+    test "a stray message does not crash the coordinator or drop claims" do
+      key = {make_ref(), :stray}
+      assert :ok = StreamRegistry.replace_and_register(key)
+      registry = Process.whereis(Dstar.Utility.StreamRegistry)
+
+      send(registry, :unexpected)
+
+      assert Process.whereis(Dstar.Utility.StreamRegistry) == registry
+      assert {:ok, pid, _claim} = StreamRegistry.owner(key)
+      assert pid == self()
+      StreamRegistry.unregister_self()
+    end
+
+    test "unregister_self/0 releases only the caller's claims, without scanning others" do
+      parent = self()
+
+      holder =
+        spawn(fn ->
+          for i <- 1..5_000, do: :ok = StreamRegistry.replace_and_register({:other, i})
+          send(parent, :claimed)
+          receive do: (:stop -> StreamRegistry.unregister_self())
+          send(parent, :released)
+        end)
+
+      assert_receive :claimed, 5_000
+      mine = [{make_ref(), :a}, {make_ref(), :b}]
+      for key <- mine, do: :ok = StreamRegistry.replace_and_register(key)
+
+      registry = Process.whereis(Dstar.Utility.StreamRegistry)
+      {:reductions, before} = Process.info(registry, :reductions)
+      for _ <- 1..100, do: StreamRegistry.unregister_self()
+      {:reductions, after_calls} = Process.info(registry, :reductions)
+
+      # A scan of 5,000 claims costs far more than this per call.
+      assert after_calls - before < 100 * 1_000
+
+      for key <- mine, do: assert(StreamRegistry.owner(key) == :error)
+      assert {:ok, ^holder, _claim} = StreamRegistry.owner({:other, 1})
+
+      send(holder, :stop)
+      assert_receive :released, 5_000
+      assert StreamRegistry.owner({:other, 5_000}) == :error
+      assert %{owned: owned, claims: claims} = :sys.get_state(registry)
+      refute Map.has_key?(owned, holder)
+      refute Enum.any?(claims, fn {_token, claim} -> claim.pid == holder end)
+    end
+  end
 end
