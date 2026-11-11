@@ -102,3 +102,6 @@ Behavior changes need matching updates in all of these, or CI/docs drift:
   (no `HEX_API_KEY`) and creates the GitHub Release from the CHANGELOG
   section. Don't publish by hand, and don't rename the workflow file or the
   environment: hex.pm trusts those exact names.
+  The "Immutable release tags" ruleset blocks moving or deleting `v*` tags;
+  fix a bad release with a new patch version. Keep workflow actions pinned
+  to commit SHAs.

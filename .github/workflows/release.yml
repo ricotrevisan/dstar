@@ -4,6 +4,10 @@ name: Release
 # https://hex.pm/docs/workload-identity
 # hex.pm trusts owner `ricotrevisan`, repo `dstar`, workflow `release.yml`,
 # environment `release`. Renaming this file or the environment breaks publishing.
+#
+# Only the `publish` job can mint the OIDC token, and it runs nothing but the
+# publish itself. Tests run before it, the GitHub Release after it, each
+# without that permission. Actions are pinned to commit SHAs.
 
 on:
   push:
@@ -18,47 +22,59 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
-    # Protection rules (required reviewer, tag pattern) live on this environment.
-    environment: release
-    permissions:
-      id-token: write # OIDC token that mix exchanges for a 15-minute Hex token
-      contents: write # create the GitHub Release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      # Workload Identity needs OTP 27+ and Hex 2.6+.
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           elixir-version: "1.18"
           otp-version: "27"
 
-      - name: Check tag matches mix.exs version
+      - name: Check tag format and that it matches mix.exs
         run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH[-pre]"
+            exit 1
+          fi
           version=$(sed -n 's/^  @version "\(.*\)"$/\1/p' mix.exs)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match mix.exs version $version"
             exit 1
           fi
 
-      - name: Extract release notes from CHANGELOG
-        run: |
-          version=${GITHUB_REF_NAME#v}
-          awk -v v="$version" '
-            index($0, "## " v " ") == 1 { found = 1; next }
-            found && /^## / { exit }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::No '## $version' section in CHANGELOG.md"
-            exit 1
-          fi
+      - name: Check CHANGELOG has a section for this version
+        run: .github/scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > /dev/null
+
+      - run: mix deps.get
+      - run: mix hex.audit
+      - run: mix compile --warnings-as-errors
+      - run: mix test
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    # Protection rules (required reviewer, `v*` tags only) live on this environment.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # OIDC token that mix exchanges for a 15-minute Hex token
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Workload Identity needs OTP 27+ and Hex 2.6+.
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
 
       - run: mix local.hex --force
       - run: mix deps.get
-      - run: mix compile --warnings-as-errors
-      - run: mix test
 
       # No HEX_API_KEY: a configured key would take precedence over Workload
       # Identity. Expect "Authenticated with Workload Identity" in the log.
@@ -66,10 +82,21 @@ jobs:
       - name: Publish to Hex
         run: mix hex.publish --yes
 
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          .github/scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file release-notes.md \
