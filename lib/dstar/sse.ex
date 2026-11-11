@@ -99,6 +99,25 @@ defmodule Dstar.SSE do
     Plug.Conn.chunk(conn, encode(event_type, data_lines, opts))
   end
 
+  @doc false
+  # Datastar events from `Dstar.Elements` and `Dstar.Signals`: takes the
+  # `{key, value}` fields directly so each value is split once and the frame
+  # stays iodata until the adapter writes it.
+  @spec send_datastar!(Plug.Conn.t(), String.t(), [{String.t(), String.t()}], keyword()) ::
+          Plug.Conn.t()
+  def send_datastar!(conn, event_type, fields, opts) do
+    case Plug.Conn.chunk(conn, encode_datastar(event_type, fields, opts)) do
+      {:ok, conn} -> conn
+      {:error, reason} -> raise "Failed to send SSE event: #{inspect(reason)}"
+    end
+  end
+
+  @doc false
+  @spec format_datastar(String.t(), [{String.t(), String.t()}], keyword()) :: String.t()
+  def format_datastar(event_type, fields, opts) do
+    event_type |> encode_datastar(fields, opts) |> IO.iodata_to_binary()
+  end
+
   @doc """
   Sends an SSE event, raising on error. Returns the updated conn.
 
@@ -132,7 +151,7 @@ defmodule Dstar.SSE do
   """
   @spec format_event(String.t() | nil, list(String.t()) | String.t(), keyword()) :: String.t()
   def format_event(event_type, data_lines, opts \\ []) do
-    encode(event_type, data_lines, opts)
+    event_type |> encode(data_lines, opts) |> IO.iodata_to_binary()
   end
 
   @doc false
@@ -147,26 +166,48 @@ defmodule Dstar.SSE do
   def datastar_data(fields) do
     Enum.flat_map(fields, fn
       {key, value} when key in @multi_line_keys ->
-        value |> split_data_value() |> Enum.map(&"#{key} #{&1}")
+        value |> split_lines() |> Enum.map(&(key <> " " <> &1))
 
       {key, value} ->
-        ["#{key} #{strip_line_breaks(value)}"]
+        [key <> " " <> strip_line_breaks(value)]
     end)
   end
 
-  # The one SSE frame builder: send_event/4 chunks it, format_event/3 returns
-  # it. These were separate copies until format_event dropped `id`/`retry` and
-  # emitted an empty `event:` line for a nil type.
+  # The one SSE frame builder, as iodata: send_event/4 chunks it,
+  # format_event/3 flattens it. These were separate copies until
+  # format_event dropped `id`/`retry` and emitted an empty `event:` line for
+  # a nil type.
   defp encode(event_type, data_lines, opts) do
     data_lines = if is_binary(data_lines), do: [data_lines], else: data_lines
 
-    []
-    |> maybe_add_event(event_type)
-    |> maybe_add_id(opts[:event_id])
-    |> maybe_add_retry(opts[:retry])
-    |> add_data_lines(data_lines)
-    |> Enum.join()
-    |> Kernel.<>("\n")
+    [
+      header(event_type, opts),
+      Enum.map(data_lines, fn value ->
+        value |> split_lines() |> Enum.map(&["data: ", &1, ?\n])
+      end),
+      ?\n
+    ]
+  end
+
+  # Same frame as `encode(event_type, datastar_data(fields), opts)`, without
+  # building, re-splitting and joining an intermediate string per line.
+  defp encode_datastar(event_type, fields, opts) do
+    [header(event_type, opts), Enum.map(fields, &datastar_field/1), ?\n]
+  end
+
+  defp datastar_field({key, value}) when key in @multi_line_keys do
+    prefix = ["data: ", key, ?\s]
+    value |> split_lines() |> Enum.map(&[prefix, &1, ?\n])
+  end
+
+  defp datastar_field({key, value}), do: ["data: ", key, ?\s, strip_line_breaks(value), ?\n]
+
+  defp header(event_type, opts) do
+    [
+      field("event", event_type),
+      field("id", opts[:event_id]),
+      retry_field(opts[:retry])
+    ]
   end
 
   # Private helpers — SSE framing safety
@@ -180,19 +221,13 @@ defmodule Dstar.SSE do
   #   * `event:` / `id:` / `retry:` are single-valued — terminators are
   #     stripped, since a multi-line value is never meaningful for them.
 
-  defp split_data_value(value), do: String.split(value, ["\r\n", "\r", "\n"])
+  defp split_lines(value), do: :binary.split(value, ["\r\n", "\r", "\n"], [:global])
 
-  defp strip_line_breaks(value), do: value |> to_string() |> String.replace(["\r", "\n"], "")
+  defp strip_line_breaks(value),
+    do: value |> to_string() |> :binary.replace(["\r", "\n"], "", [:global])
 
-  defp maybe_add_event(lines, nil), do: lines
-
-  defp maybe_add_event(lines, event_type),
-    do: lines ++ ["event: #{strip_line_breaks(event_type)}\n"]
-
-  defp maybe_add_id(lines, nil), do: lines
-  defp maybe_add_id(lines, id), do: lines ++ ["id: #{strip_line_breaks(id)}\n"]
-
-  defp maybe_add_retry(lines, nil), do: lines
+  defp field(_name, nil), do: []
+  defp field(name, value), do: [name, ": ", strip_line_breaks(value), ?\n]
 
   # The Datastar SDK ADR specifies emitting `retry:` only when it differs
   # from the SDK default ("unless default of 1000"), and the official Go
@@ -203,14 +238,7 @@ defmodule Dstar.SSE do
   # so a stream that already sent `retry: 5000` cannot lower itself back to
   # the default — `retry: 1000` is omitted rather than re-sent. Send a
   # non-default value if you need to reset an elevated retry mid-stream.
-  defp maybe_add_retry(lines, @default_retry), do: lines
-
-  defp maybe_add_retry(lines, retry), do: lines ++ ["retry: #{strip_line_breaks(retry)}\n"]
-
-  defp add_data_lines(lines, data_lines) do
-    lines ++
-      Enum.flat_map(data_lines, fn value ->
-        Enum.map(split_data_value(value), &"data: #{&1}\n")
-      end)
-  end
+  defp retry_field(nil), do: []
+  defp retry_field(@default_retry), do: []
+  defp retry_field(retry), do: field("retry", retry)
 end

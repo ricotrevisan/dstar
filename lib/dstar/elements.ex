@@ -64,7 +64,7 @@ defmodule Dstar.Elements do
   """
   @spec patch(Plug.Conn.t(), String.t() | Phoenix.HTML.safe() | nil, keyword()) :: Plug.Conn.t()
   def patch(conn, html, opts \\ []) do
-    SSE.send_event!(conn, @event_type, data_lines(html, opts), opts)
+    SSE.send_datastar!(conn, @event_type, data_lines(html, opts), opts)
   end
 
   @doc """
@@ -142,7 +142,7 @@ defmodule Dstar.Elements do
   """
   @spec format_patch(String.t() | Phoenix.HTML.safe() | nil, keyword()) :: String.t()
   def format_patch(html, opts \\ []) do
-    SSE.format_event(@event_type, data_lines(html, opts), opts)
+    SSE.format_datastar(@event_type, data_lines(html, opts), opts)
   end
 
   @doc """
@@ -193,7 +193,6 @@ defmodule Dstar.Elements do
     |> maybe_add_namespace(namespace)
     |> maybe_add_view_transitions(use_view_transitions)
     |> maybe_add_elements(html)
-    |> SSE.datastar_data()
   end
 
   defp maybe_add_selector(lines, nil), do: lines

@@ -57,6 +57,11 @@
 
 ### Changed
 
+- **Faster SSE encoding.** Element and signal patches are built as iodata
+  in one pass (each value split once, no per-line string or join), and
+  `patch/3` hands the iodata straight to the adapter. Multiline HEEx
+  patches encode 3–7x faster (1.1 MB: 74 ms → 16 ms). Output bytes are
+  unchanged.
 - **DELETE signals fall back to the JSON body.** `Dstar.Signals.fetch/2`
   and `read/1` use the `datastar` query parameter when present (Datastar
   v1.0) and otherwise the body, which newer Datastar clients send.
