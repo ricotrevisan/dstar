@@ -737,7 +737,7 @@ plug :protect_from_forgery
 2. Expose the token as a **non-prefixed** signal in your root layout:
 
 ```heex
-<body data-signals:csrf={"'#{get_csrf_token()}'"}>
+<body data-signals:csrf={Dstar.js_value(get_csrf_token())}>
 ```
 
 Because `csrf` is not `_`-prefixed, Datastar includes it in every request.
@@ -817,7 +817,7 @@ The `Dstar` module delegates to these. Use them directly when you need more cont
 | `Dstar.SSE` | `start/1`, `check_connection/1`, `send_event/3,4`, `send_event!/3,4`, `format_event/2,3` |
 | `Dstar.Signals` | `fetch/1,2`, `read/1`, `send_error/2`, `patch/2,3`, `patch_raw/2,3`, `nudge/2,3`, `remove_signals/2,3`, `format_patch/1,2`, `format_remove/1,2` |
 | `Dstar.Elements` | `patch/2,3`, `remove/2,3`, `append/3,4`, `upsert/2,3`, `format_patch/1,2`, `format_remove/1,2` |
-| `Dstar.Actions` | `post/1,2,3`, `get/1,2,3`, `put/1,2,3`, `patch/1,2,3`, `delete/1,2,3`, `on_nudge/2`, `encode_module/1`, `decode_module/1` |
+| `Dstar.Actions` | `post/1,2,3`, `get/1,2,3`, `put/1,2,3`, `patch/1,2,3`, `delete/1,2,3`, `on_nudge/2`, `js_value/1`, `encode_module/1`, `decode_module/1` |
 | `Dstar.Scripts` | `execute/2,3`, `redirect/2,3`, `console_log/2,3` |
 | `Dstar.Plugs.Dispatch` | Standard Plug for dynamic event routing |
 | `Dstar.Plugs.RenameCsrfParam` | Standard Plug for CSRF param compatibility |

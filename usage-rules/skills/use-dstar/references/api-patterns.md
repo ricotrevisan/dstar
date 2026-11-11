@@ -111,7 +111,7 @@ end
 ```heex
 <li id={"todo-#{@todo.id}"} class="todo-item">
   <span><%= @todo.text %></span>
-  <button data-signals:deleting_id={"'#{@todo.id}'"}
+  <button data-signals:deleting_id={Dstar.js_value(@todo.id)}
           data-on:click="@delete('/todos/delete')">
     Delete
   </button>
@@ -382,7 +382,7 @@ end
   <meta charset="utf-8" />
   <script src="/assets/datastar.js"></script>
 </head>
-<body data-signals:csrf={"'#{get_csrf_token()}'"}>
+<body data-signals:csrf={Dstar.js_value(get_csrf_token())}>
   <%= @inner_content %>
 </body>
 </html>

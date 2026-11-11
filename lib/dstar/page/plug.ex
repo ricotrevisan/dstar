@@ -233,6 +233,9 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     end
 
     defp crash(page, callback, conn, exception, stacktrace) do
+      # Scrubbed once for the log, the console relay and the re-raise: raw
+      # frames carry the conn and signals (see Dstar.CrashReport).
+      stacktrace = Dstar.CrashReport.scrub(stacktrace)
       log_crash(page, callback, exception, stacktrace)
 
       if Application.get_env(:dstar, :debug_errors, false) do
@@ -251,7 +254,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
     defp log_crash(page, callback, exception, stacktrace) do
       Logger.error(
         "Dstar.Page.Plug: #{inspect(page)}.#{callback} raised:\n" <>
-          Exception.format(:error, exception, stacktrace)
+          Dstar.CrashReport.format(exception, stacktrace)
       )
     end
   end

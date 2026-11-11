@@ -31,7 +31,7 @@ defmodule Dstar.Actions do
   #
   # To set up the token, add this signal to your root layout:
   #
-  #     <body data-signals:csrf={"'#{get_csrf_token()}'"}>
+  #     <body data-signals:csrf={Dstar.js_value(get_csrf_token())}>
   #
 
   @verbs ~w(get post put patch delete)a
@@ -164,6 +164,39 @@ defmodule Dstar.Actions do
       @nudge_attr => action,
       @nudge_filter_attr => Jason.encode!(%{include: "^nudges\\.#{key}$"})
     }
+  end
+
+  @doc """
+  Encodes `value` as a JavaScript literal for a Datastar expression
+  attribute such as `data-signals:*`, `data-computed:*` or `data-on:*`.
+
+  Datastar evaluates those attributes as JavaScript, so never build a JS
+  string literal by hand around interpolated data: `{"'\#{@id}'"}` lets a
+  `'` in the value end the string and run code. HEEx escaping only protects
+  the HTML attribute, not the expression inside it.
+
+      <div data-signals:user_name={Dstar.js_value(@user.name)}>
+
+  The output is JSON with `<`, `/`, U+2028 and U+2029 escaped (safe inside
+  a `<script>` element too), and `$` escaped as `\\u0024` so Datastar's
+  `$signal` rewriting cannot alter a string value. Accepts anything `Jason`
+  can encode.
+
+  ## Examples
+
+      iex> Dstar.Actions.js_value("it's $5")
+      ~S("it's \\u00245")
+
+      iex> Dstar.Actions.js_value(42)
+      "42"
+
+  """
+  @spec js_value(term()) :: String.t()
+  def js_value(value) do
+    value
+    |> Jason.encode!(escape: :html_safe)
+    # `$` only occurs inside JSON strings, where `\u0024` is the same character.
+    |> String.replace("$", "\\u0024")
   end
 
   # ── Shared action builder ────────────────────────────────────────────
