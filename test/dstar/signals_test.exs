@@ -77,6 +77,44 @@ defmodule Dstar.SignalsTest do
       assert Signals.read(conn) == body_params
     end
 
+    test "rejects a non-object body after RenameCsrfParam added _csrf_token (audit A5)" do
+      for json <- ["[]", "42", "null"] do
+        conn =
+          conn(:post, "/", json)
+          |> Plug.Conn.put_req_header("content-type", "application/json")
+          |> Plug.Parsers.call(Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+          |> Map.update!(:query_params, fn _ -> %{"datastar" => ~s({"csrf":"tok"})} end)
+          |> Dstar.Plugs.RenameCsrfParam.call(Dstar.Plugs.RenameCsrfParam.init([]))
+
+        assert conn.body_params["_csrf_token"] == "tok"
+        assert {:error, :not_an_object, _conn} = Signals.fetch(conn)
+        assert_raise ArgumentError, fn -> Signals.read(conn) end
+      end
+    end
+
+    test "DELETE reads the body when there is no datastar query param" do
+      conn =
+        conn(:delete, "/", ~s({"id":7}))
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+
+      assert {:ok, %{"id" => 7}, _conn} = Signals.fetch(conn)
+
+      parsed = Plug.Parsers.call(conn, Plug.Parsers.init(parsers: [:json], json_decoder: Jason))
+      assert Signals.read(parsed) == %{"id" => 7}
+    end
+
+    test "DELETE prefers the datastar query param over the body" do
+      conn =
+        conn(
+          :delete,
+          "/?datastar=" <> URI.encode_www_form(~s({"from":"query"})),
+          ~s({"from":"body"})
+        )
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+
+      assert {:ok, %{"from" => "query"}, _conn} = Signals.fetch(conn)
+    end
+
     test "rejects arrays, scalars, and null from either transport" do
       for json <- ["[]", ~s("value"), "42", "true", "null"] do
         query_conn = conn(:get, "/?datastar=" <> URI.encode_www_form(json))

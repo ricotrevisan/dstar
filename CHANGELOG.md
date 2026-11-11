@@ -24,6 +24,20 @@
   passes request-derived attribute names to it). CI now runs
   `mix hex.audit`.
 
+- **`Dstar.Plugs.RenameCsrfParam` no longer does unbounded or needless
+  work before CSRF validation.** It skips GET/HEAD/OPTIONS (which
+  `Plug.CSRFProtection` never checks), stops at the first valid source so
+  the `datastar` JSON is only decoded when the body has no token, reads
+  `datastar` from the query string only (a `datastar` key in a POST body
+  is not a token channel), and skips values over the new `:max_bytes`
+  option (default: the `Dstar.Signals.fetch/2` limit). A POST whose body
+  no parser fetched (e.g. `text/plain`) now passes through instead of
+  raising a 500.
+- **`Dstar.Signals` rejects a non-object JSON body even after
+  `RenameCsrfParam` ran.** Plug.Parsers wraps `[]`/`42`/`null` as
+  `%{"_json" => ...}`; the plug's added `_csrf_token` made that a two-key
+  map that was accepted as signals.
+
 ### Added
 
 - **`Dstar.js_value/1`** (and `Dstar.Actions.js_value/1`) encodes any
@@ -32,6 +46,9 @@
 
 ### Changed
 
+- **DELETE signals fall back to the JSON body.** `Dstar.Signals.fetch/2`
+  and `read/1` use the `datastar` query parameter when present (Datastar
+  v1.0) and otherwise the body, which newer Datastar clients send.
 - **Releases are published from CI with
   [Hex Workload Identity](https://hex.pm/docs/workload-identity).** A tag
   push runs `.github/workflows/release.yml`, which publishes with a

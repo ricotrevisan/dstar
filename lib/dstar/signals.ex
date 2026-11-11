@@ -25,9 +25,10 @@ defmodule Dstar.Signals do
   @doc """
   Safely fetches signals and returns the connection that owns the body state.
 
-  Only JSON objects are accepted. GET and DELETE read the `datastar` query
-  parameter; other methods use already-fetched body params or read the raw
-  JSON body. Missing signals or an empty raw body produce an empty object;
+  Only JSON objects are accepted. GET reads the `datastar` query parameter.
+  DELETE reads it when present and otherwise the body, since Datastar
+  clients after v1.0 send DELETE signals as a JSON body. Other methods use
+  already-fetched body params or read the raw JSON body. Missing signals or an empty raw body produce an empty object;
   an explicitly empty `datastar=` query value is malformed.
 
   Raw reads bound both `Plug.Conn.read_body/2`'s `:length` and
@@ -53,24 +54,18 @@ defmodule Dstar.Signals do
     max_bytes = max_bytes!(opts)
 
     case conn do
-      %Plug.Conn{method: method} when method in ["GET", "DELETE"] ->
+      %Plug.Conn{method: "GET"} ->
         fetch_query_signals(conn, max_bytes)
 
-      %Plug.Conn{body_params: %Plug.Conn.Unfetched{}} ->
-        fetch_raw_body(conn, max_bytes)
+      %Plug.Conn{method: "DELETE"} ->
+        conn = Plug.Conn.fetch_query_params(conn)
 
-      %Plug.Conn{body_params: %{"_json" => _value} = body_params}
-      when map_size(body_params) == 1 ->
-        # Plug.Parsers wraps a non-object JSON document under this reserved
-        # key so it can merge params. Datastar never sends underscore-prefixed
-        # signals, so this exact shape cannot be a legitimate signal object.
-        {:error, :not_an_object, conn}
-
-      %Plug.Conn{body_params: body_params} when is_map(body_params) ->
-        {:ok, body_params, conn}
+        if Map.has_key?(conn.query_params, @datastar_key),
+          do: fetch_query_signals(conn, max_bytes),
+          else: fetch_body_signals(conn, max_bytes)
 
       %Plug.Conn{} ->
-        {:error, :not_an_object, conn}
+        fetch_body_signals(conn, max_bytes)
     end
   end
 
@@ -90,7 +85,7 @@ defmodule Dstar.Signals do
   end
 
   def read(%Plug.Conn{method: method, query_params: params} = conn)
-      when method in ["GET", "DELETE"] do
+      when method == "GET" or (method == "DELETE" and is_map_key(params, @datastar_key)) do
     case decode_query_signals(params, @default_max_bytes) do
       {:ok, signals} -> signals
       {:error, reason} -> raise ArgumentError, invalid_message(reason, conn)
@@ -102,15 +97,11 @@ defmodule Dstar.Signals do
           "body params are unfetched; use Dstar.Signals.fetch/2 and thread its returned conn"
   end
 
-  def read(%Plug.Conn{body_params: %{"_json" => _value} = body_params} = conn)
-      when map_size(body_params) == 1 do
-    raise ArgumentError, invalid_message(:not_an_object, conn)
-  end
-
-  def read(%Plug.Conn{body_params: body_params}) when is_map(body_params), do: body_params
-
-  def read(%Plug.Conn{} = conn) do
-    raise ArgumentError, invalid_message(:not_an_object, conn)
+  def read(%Plug.Conn{body_params: body_params} = conn) do
+    case body_signals(body_params) do
+      {:ok, signals} -> signals
+      {:error, reason} -> raise ArgumentError, invalid_message(reason, conn)
+    end
   end
 
   @doc """
@@ -303,6 +294,29 @@ defmodule Dstar.Signals do
     |> Plug.Conn.send_resp(status, body)
     |> Plug.Conn.halt()
   end
+
+  defp fetch_body_signals(%Plug.Conn{body_params: %Plug.Conn.Unfetched{}} = conn, max_bytes),
+    do: fetch_raw_body(conn, max_bytes)
+
+  defp fetch_body_signals(conn, _max_bytes) do
+    case body_signals(conn.body_params) do
+      {:ok, signals} -> {:ok, signals, conn}
+      {:error, reason} -> {:error, reason, conn}
+    end
+  end
+
+  # Plug.Parsers wraps a non-object JSON document under `_json` so it can
+  # merge params. Datastar never sends underscore-prefixed signals, so that
+  # shape is "not an object" — also when RenameCsrfParam has added
+  # `_csrf_token` beside it. `_json` next to real signal keys is an object.
+  defp body_signals(%{"_json" => _} = body_params) do
+    if body_params |> Map.delete("_csrf_token") |> map_size() == 1,
+      do: {:error, :not_an_object},
+      else: {:ok, body_params}
+  end
+
+  defp body_signals(body_params) when is_map(body_params), do: {:ok, body_params}
+  defp body_signals(_body_params), do: {:error, :not_an_object}
 
   defp fetch_query_signals(conn, max_bytes) do
     conn = Plug.Conn.fetch_query_params(conn)
