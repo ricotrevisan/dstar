@@ -309,14 +309,88 @@ defmodule Dstar.StreamTest do
       assert_received :disconnected
     end
 
-    test "rejects non-positive or non-integer :idle_check" do
-      {:ok, conn} = Stream.open(conn(:post, "/stream"))
-
+    test "rejects non-positive or non-integer :idle_check and releases any claimed key" do
       for bad <- [0, -10, nil, "50"] do
+        key = make_ref()
+        {:ok, conn} = Stream.open(keyed_conn("tab-bad-idle"), key: key)
+
         assert_raise ArgumentError, ~r/:idle_check must be a positive integer/, fn ->
           Stream.run(conn, idle_check: bad)
         end
+
+        assert StreamRegistry.owner({key, "tab-bad-idle"}) == :error
       end
+    end
+
+    test "releases the original claim even when :info returns a conn without claim metadata" do
+      key = make_ref()
+
+      pid =
+        spawn_stream(fn parent ->
+          {:ok, conn} = Stream.open(keyed_conn("tab-stripped"), key: key)
+
+          Stream.run(conn,
+            connect: connected(parent),
+            info: fn :stop, conn ->
+              {:halt, %{conn | private: %{}}}
+            end,
+            disconnect: fn final_conn ->
+              send(parent, {:disconnected, final_conn.private})
+            end
+          )
+        end)
+
+      assert_receive {:connected, ^pid}
+      send(pid, :stop)
+
+      assert_receive {:disconnected, %{}}
+      assert_receive {:stream_done, ^pid, {:returned, _conn}}
+      assert StreamRegistry.owner({key, "tab-stripped"}) == :error
+      Process.exit(pid, :kill)
+    end
+
+    test "recognizes takeover against the original claim even if a callback strips conn.private" do
+      key = make_ref()
+
+      old =
+        spawn_stream(
+          fn parent ->
+            {:ok, conn} = Stream.open(keyed_conn("tab-stripped-takeover"), key: key)
+
+            Stream.run(conn,
+              connect: fn conn ->
+                send(parent, {:connected, self()})
+                %{conn | private: %{}}
+              end,
+              replaced: fn msg, conn ->
+                send(parent, {:replaced, msg, conn.private})
+                conn
+              end,
+              disconnect: fn conn -> send(parent, {:disconnected, conn.private}) end
+            )
+          end,
+          trap_exits: true
+        )
+
+      assert_receive {:connected, ^old}
+
+      new =
+        spawn_stream(fn parent ->
+          {:ok, conn} = Stream.open(keyed_conn("tab-stripped-takeover"), key: key)
+          send(parent, {:connected, self()})
+          Process.sleep(:infinity)
+          conn
+        end)
+
+      assert_receive {:connected, ^new}
+      assert_receive {:replaced, {:EXIT, _pid, :replaced}, %{}}
+      assert_receive {:disconnected, %{}}
+      assert_receive {:stream_done, ^old, {:returned, _conn}}
+      assert {:ok, ^new, _claim} = StreamRegistry.owner({key, "tab-stripped-takeover"})
+
+      Process.sleep(150)
+      assert Process.alive?(old)
+      Enum.each([old, new], &Process.exit(&1, :kill))
     end
   end
 end

@@ -458,9 +458,13 @@ defmodule Dstar.Page.PlugTest do
 
       log =
         capture_log(fn ->
-          assert_raise MatchError, fn ->
-            PagePlug.call(conn, PagePlug.init({:event, MatchErrorPage}))
-          end
+          exception =
+            assert_raise MatchError, fn ->
+              PagePlug.call(conn, PagePlug.init({:event, MatchErrorPage}))
+            end
+
+          refute inspect(exception.term) =~ "hunter2"
+          refute inspect(exception.term) =~ "SECRET-CSRF"
         end)
 
       assert_receive {:chunk, relayed}
