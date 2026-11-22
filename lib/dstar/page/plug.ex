@@ -242,7 +242,7 @@ if Code.ensure_loaded?(Phoenix.Controller) do
         # Best-effort: if the conn died mid-stream, console_log raising
         # here would shadow the original exception.
         try do
-          Dstar.console_log(conn, Exception.format(:error, exception, stacktrace), level: :error)
+          Dstar.console_log(conn, Dstar.CrashReport.format(exception, stacktrace), level: :error)
         rescue
           _ -> :ok
         end

@@ -89,9 +89,10 @@ defmodule Mix.Tasks.Dstar.Https do
 
     validate_host!(host)
     validate_ip!(ip)
+    ensure_supported_os!(host, ip, hosts_file, dry_run?)
     validate_hosts_entry!(host, ip, hosts_file)
 
-    if confirmed?(host, yes?, dry_run?) do
+    if confirmed?(host, ip, hosts_file, yes?, dry_run?) do
       ensure_mkcert!(dry_run?)
       install_mkcert_ca(dry_run?)
       add_hosts_entry(host, ip, hosts_file, dry_run?)
@@ -199,8 +200,7 @@ defmodule Mix.Tasks.Dstar.Https do
         end
 
       {:error, reason} ->
-        Mix.shell().error("Could not read #{hosts_file}: #{:file.format_error(reason)}")
-        append_hosts_entry(host, ip, hosts_file, dry_run?)
+        raise_hosts_read_error!(hosts_file, reason)
     end
   end
 
@@ -212,8 +212,24 @@ defmodule Mix.Tasks.Dstar.Https do
           _ -> :ok
         end
 
-      {:error, _reason} ->
-        :ok
+      {:error, reason} ->
+        raise_hosts_read_error!(hosts_file, reason)
+    end
+  end
+
+  defp raise_hosts_read_error!(hosts_file, reason) do
+    Mix.raise(
+      "Could not read #{hosts_file}: #{:file.format_error(reason)}. " <>
+        "Refusing to modify it without checking for conflicting entries."
+    )
+  end
+
+  defp ensure_supported_os!(_host, _ip, _hosts_file, true), do: :ok
+
+  defp ensure_supported_os!(host, ip, hosts_file, false) do
+    if windows?(:os.type()) do
+      command = hosts_append_command(host, ip, hosts_file)
+      Mix.raise(windows_unsupported_message(command, host: host, ip: ip))
     end
   end
 
@@ -267,23 +283,23 @@ defmodule Mix.Tasks.Dstar.Https do
     )
   end
 
-  defp confirmed?(_host, true, _dry_run?), do: true
-  defp confirmed?(_host, _yes?, true), do: true
+  defp confirmed?(_host, _ip, _hosts_file, true, _dry_run?), do: true
+  defp confirmed?(_host, _ip, _hosts_file, _yes?, true), do: true
 
-  defp confirmed?(host, _yes?, _dry_run?) do
-    Mix.shell().info(prompt_intro(host))
+  defp confirmed?(host, ip, hosts_file, _yes?, _dry_run?) do
+    Mix.shell().info(prompt_intro(host, ip, hosts_file))
     confirm(prompt_question())
   end
 
   @doc false
-  def prompt_intro(host) do
+  def prompt_intro(host, ip \\ @default_ip, hosts_file \\ @default_hosts_file) do
     """
-    Dstar can add `#{host}` to your hosts file and generate a
+    Dstar can add `#{ip} #{host}` to `#{hosts_file}` and generate a
     browser-trusted HTTPS certificate with mkcert.
     This lets your browser open `https://#{host}` without certificate errors,
     and enables HTTP/2 so Datastar SSE streams don't hit the 6-connection
     browser limit.
-    This may require sudo privileges for `/etc/hosts` and mkcert's local CA
+    This may require sudo privileges for `#{hosts_file}` and mkcert's local CA
     installation.
     """
   end
@@ -510,7 +526,7 @@ defmodule Mix.Tasks.Dstar.Https do
 
   defp validate_host!(host) do
     if Regex.match?(
-         ~r/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i,
+         ~r/\A(?=.{1,253}\z)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/i,
          host
        ) do
       :ok

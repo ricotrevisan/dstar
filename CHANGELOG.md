@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+### Security
+
+- **Crash reports now redact sensitive exception terms, not only stacktrace
+  argument lists.** `Dstar.CrashReport.format/2` redacts `%Plug.Conn{}` and
+  sensitive keys (`csrf`, `password`, `token`, `secret`, `cookie`,
+  `authorization`, plus Phoenix's `:filter_parameters`) inside `MatchError`,
+  `KeyError`, `CaseClauseError`, `WithClauseError`, `BadMapError`,
+  `BadStructError`, `BadBooleanError`, `TryClauseError`, and
+  `Protocol.UndefinedError` before logging in `Dstar.Plugs.Dispatch` and
+  `Dstar.Page.Plug` or relaying to the browser console under `debug_errors`.
+- **Validated `:idle_check`, `:max_bytes`, and `:max_signal_bytes` options.**
+  `Dstar.Stream.run/2` and `use Dstar.Page` reject non-positive `:idle_check`
+  values (preventing an infinite liveness-probe loop on `<= 0`).
+  `Dstar.Plugs.RenameCsrfParam.init/1` and `Dstar.Plugs.Dispatch.init/1` now
+  validate `:max_bytes` / `:max_signal_bytes` as positive integers at init time
+  (previously `max_bytes: nil` silently bypassed the size guard).
+- **Bounded `Dstar.Utility.StreamRegistry` calls.** Claims and releases use a
+  finite timeout (default 5s, configurable via `:claim_timeout` on
+  `start_stream/3` and `Dstar.Stream.open/2`) instead of `:infinity`, so a
+  stalled coordinator fails closed with 503 rather than hanging callers.
+- **Hardened `mix dstar.https`.** `validate_host!/1` now uses `\A…\z` anchors
+  (rejecting trailing newlines), the confirmation prompt displays the actual
+  `ip` and `hosts_file`, unreadable hosts files fail closed instead of
+  appending blindly, and Windows exits with native guidance before running
+  `mkcert -install`.
+- **Cleaned up insecure patterns in shipped docs and `usage-rules/`.** Removed
+  client-chosen PubSub topic subscription and raw `inspect(signals)` /
+  unscrubbed stacktrace logging from `usage-rules/error-handling.md`; added
+  ownership checks, allowlists, and HTML escaping in `api-patterns.md` and
+  `SKILL.md`; added sanitization guidance to `javascript-islands.md`; fixed
+  broken template syntax in `loading-states.md`; clarified GET CSRF exemption,
+  user-scoped `stream_key/1`, dev-only `debug_errors`, raw `patch_elements`
+  binaries, `decode_module/1` allowlist requirement, `plug_crypto >= 2.2.1`,
+  and CDN vendoring/SRI guidance.
+- **Updated lockfile dependencies** (`phoenix` 1.8.17, `phoenix_live_view`
+  1.2.15, `plug` 1.20.4) to address EEF-CVE-2026-128361, EEF-CVE-2026-129344,
+  EEF-CVE-2026-126334, and EEF-CVE-2026-120287, and unlocked unused
+  `cowboy_telemetry` and `ranch`.
+
 ## 0.3.3 — 2026-11-11
 
 ### Security

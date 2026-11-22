@@ -22,6 +22,13 @@ defmodule Dstar.Signals do
   @doc false
   def default_max_bytes, do: @default_max_bytes
 
+  @doc false
+  def validate_max_bytes!(max_bytes) when is_integer(max_bytes) and max_bytes > 0, do: max_bytes
+
+  def validate_max_bytes!(value) do
+    raise ArgumentError, ":max_bytes must be a positive integer, got: #{inspect(value)}"
+  end
+
   @doc """
   Safely fetches signals and returns the connection that owns the body state.
 
@@ -397,13 +404,9 @@ defmodule Dstar.Signals do
   defp decode_payload(_payload, _max_bytes), do: {:error, :not_an_object}
 
   defp max_bytes!(opts) do
-    case Keyword.get(opts, :max_bytes, @default_max_bytes) do
-      max_bytes when is_integer(max_bytes) and max_bytes > 0 ->
-        max_bytes
-
-      value ->
-        raise ArgumentError, ":max_bytes must be a positive integer, got: #{inspect(value)}"
-    end
+    opts
+    |> Keyword.get(:max_bytes, @default_max_bytes)
+    |> validate_max_bytes!()
   end
 
   defp invalid_message(reason, conn) do

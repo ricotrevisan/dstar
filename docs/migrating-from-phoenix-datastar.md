@@ -573,7 +573,7 @@ Expose the token as a **non-prefixed** signal in your root layout:
 <body data-signals:csrf={Dstar.js_value(get_csrf_token())}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This covers the verb helpers (`post/2,3`, `get/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This covers the state-changing verb helpers (`post/2,3`, `put/2,3`, `patch/2,3`, `delete/2,3`) and hand-written `@post(...)` expressions alike — no `headers:` option needed. `Plug.CSRFProtection` skips `GET`, so keep `GET` handlers safe and idempotent.
 
 The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`. The plug skips GET/HEAD/OPTIONS (never CSRF-checked) and decodes `datastar` only when the body has no token, up to `:max_bytes`.
 

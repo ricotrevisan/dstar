@@ -213,15 +213,13 @@ Use `data-class` to apply loading styles:
 
 ```heex
 <div data-signals:_deleting="false">
-  {#for item <- @items}
-    <div data-class:opacity-30="$_deleting == {item.id}">
-      {item.name}
-      <button data-on:click="$_deleting = {item.id}; @post('/delete/{item.id}')"
-              data-indicator="_deleting">
-        Delete
-      </button>
-    </div>
-  {/for}
+  <div :for={item <- @items} data-class:opacity-30={"$_deleting == #{Dstar.js_value(item.id)}"}>
+    {item.name}
+    <button data-on:click={"$_deleting = #{Dstar.js_value(item.id)}; #{Dstar.post(ItemHandler, "delete:#{item.id}")}"}
+            data-indicator="_deleting">
+      Delete
+    </button>
+  </div>
 </div>
 ```
 
@@ -311,21 +309,13 @@ Show immediate feedback, rollback on error:
 
 ```heex
 <div data-signals:items="[]" data-signals:_updating="null">
-  {#for item <- @items}
-    <div data-class:opacity-50="$_updating == {item.id}">
-      <input type="checkbox" 
-             checked={item.completed}
-             data-on:click="
-               $_updating = {item.id};
-               $items = $items.map(i => 
-                 i.id == {item.id} ? {...i, completed: !i.completed} : i
-               );
-               @post('/toggle/{item.id}')
-             "
-             data-indicator="_updating">
-      {item.name}
-    </div>
-  {/for}
+  <div :for={item <- @items} data-class:opacity-50={"$_updating == #{Dstar.js_value(item.id)}"}>
+    <input type="checkbox"
+           checked={item.completed}
+           data-on:click={"$_updating = #{Dstar.js_value(item.id)}; $items = $items.map(i => i.id == #{Dstar.js_value(item.id)} ? {...i, completed: !i.completed} : i); #{Dstar.post(ItemHandler, "toggle:#{item.id}")}"}
+           data-indicator="_updating">
+    {item.name}
+  </div>
 </div>
 ```
 

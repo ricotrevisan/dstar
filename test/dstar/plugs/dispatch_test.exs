@@ -75,6 +75,14 @@ defmodule Dstar.Plugs.DispatchTest do
       assert %{lookup: lookup} = opts
       assert map_size(lookup) == 1
     end
+
+    test "raises on invalid :max_signal_bytes" do
+      for bad <- [nil, 0, -1, "100"] do
+        assert_raise ArgumentError, ~r/:max_bytes must be a positive integer/, fn ->
+          Dispatch.init(modules: [TestCounterHandler], max_signal_bytes: bad)
+        end
+      end
+    end
   end
 
   describe "call/2" do
@@ -339,6 +347,35 @@ defmodule Dstar.Plugs.DispatchTest do
       for secret <- ["hunter2", "CSRF-TOKEN", "SESSION-COOKIE", "API-TOKEN"] do
         refute log =~ secret
       end
+    end
+
+    test "MatchError on signals or conn does not leak secrets into crash logs" do
+      import ExUnit.CaptureLog
+
+      defmodule MatchCrashHandler do
+        def handle_event(_conn, "login", signals) do
+          %{"missing" => _} = signals
+        end
+      end
+
+      opts = Dispatch.init(modules: [MatchCrashHandler])
+      module_name = Dstar.Actions.encode_module(MatchCrashHandler)
+
+      conn =
+        conn(:post, "/ds/#{module_name}/login")
+        |> Map.put(:path_params, %{"module" => module_name, "event" => "login"})
+        |> Map.put(:body_params, %{"password" => "hunter2", "csrf" => "SECRET-CSRF"})
+
+      log =
+        capture_log(fn ->
+          assert_raise MatchError, fn ->
+            Dispatch.call(conn, opts)
+          end
+        end)
+
+      assert log =~ "MatchError"
+      refute log =~ "hunter2"
+      refute log =~ "SECRET-CSRF"
     end
   end
 end

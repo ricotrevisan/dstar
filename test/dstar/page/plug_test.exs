@@ -424,6 +424,53 @@ defmodule Dstar.Page.PlugTest do
       assert log =~ "CounterPage.handle_event/3"
       refute log =~ "hunter2"
     end
+
+    test "a MatchError on signals leaks no secrets to logs or debug_errors console relay" do
+      import ExUnit.CaptureLog
+
+      defmodule MatchErrorPage do
+        use Dstar.Page
+
+        def render(assigns), do: ~H'<div id="m">m</div>'
+
+        def handle_event(_conn, "fail", signals) do
+          %{"expected" => _} = signals
+        end
+      end
+
+      Application.put_env(:dstar, :debug_errors, true)
+      on_exit(fn -> Application.delete_env(:dstar, :debug_errors) end)
+
+      parent = self()
+
+      defmodule CaptureChunkAdapter do
+        def send_chunked(state, _status, _headers), do: {:ok, nil, state}
+
+        def chunk(parent, data) do
+          send(parent, {:chunk, IO.iodata_to_binary(data)})
+          {:ok, parent}
+        end
+      end
+
+      conn =
+        event_conn("fail", %{"password" => "hunter2", "csrf" => "SECRET-CSRF"})
+        |> Map.put(:adapter, {CaptureChunkAdapter, parent})
+
+      log =
+        capture_log(fn ->
+          assert_raise MatchError, fn ->
+            PagePlug.call(conn, PagePlug.init({:event, MatchErrorPage}))
+          end
+        end)
+
+      assert_receive {:chunk, relayed}
+
+      for output <- [log, relayed] do
+        assert output =~ "MatchError"
+        refute output =~ "hunter2"
+        refute output =~ "SECRET-CSRF"
+      end
+    end
   end
 
   describe "stream action (POST)" do

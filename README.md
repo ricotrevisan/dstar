@@ -40,9 +40,10 @@ end
 
 Pages need `{:phoenix, "~> 1.7"}` and `{:phoenix_live_view, "~> 1.0"}` in your app (any Phoenix app already has them). The functional core needs neither.
 
-Then add the Datastar client script to your root layout's `<head>`:
+Then add the Datastar client script to your root layout's `<head>`. For production apps, vendor/bundle `datastar.js` in your own assets (or add a Subresource Integrity `integrity` hash and `crossorigin="anonymous"` if loading from a CDN):
 
 ```html
+<!-- Quick start (vendor locally or add an SRI integrity hash for production) -->
 <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0/bundles/datastar.js"></script>
 ```
 
@@ -498,11 +499,14 @@ end
 ```
 
 The key is any term that identifies the user or session
-(e.g., `user.id`, `{user.id, workspace.id}`). The coordinator keys on
+(e.g., `user.id`, `{user.id, workspace.id}`). Always scope it to the
+authenticated user or session — a shared key lets another user who knows or
+guesses `tabId` replace that stream. The coordinator keys on
 `{scope_key, tab_id}` so different users and different tabs never collide.
 SSE starts only after a keyed claim succeeds. If that claim
-fails, it fails closed with a halted, plain-text 503 conn — never an
-undeduplicated stream advertised as deduplicated.
+fails (including a coordinator timeout, default 5s), it fails closed with a
+halted, plain-text 503 conn — never an undeduplicated stream advertised as
+deduplicated.
 
 If no usable `tabId` signal is present, the stream intentionally falls
 back to an unkeyed `Dstar.start/1` so existing streams keep working during
@@ -750,13 +754,24 @@ How it travels depends on the HTTP method:
 
 The plug copies the token into `body_params["_csrf_token"]` from either
 channel, where `Plug.CSRFProtection` looks. This one setup covers page
-`event()` POSTs, stream `connect()` POSTs, component events, and the verb
-helpers — including `Dstar.delete/2,3`, which `:protect_from_forgery` does
-check. GET, HEAD and OPTIONS pass through untouched, since
-`Plug.CSRFProtection` never validates them, and so does a body no parser
-fetched (e.g. a `text/plain` POST). The `datastar` value is decoded only when
-the body has no token, and only up to `:max_bytes` — set it to your
-smallest `:max_signal_bytes` (`plug Dstar.Plugs.RenameCsrfParam, max_bytes: 64_000`).
+`event()` POSTs, stream `connect()` POSTs, component events, and the
+state-changing verb helpers (`post`, `put`, `patch`, `delete`) — including
+`Dstar.delete/2,3`, which `:protect_from_forgery` does check. GET, HEAD and
+OPTIONS pass through untouched, since `Plug.CSRFProtection` never validates
+them — keep `GET` handlers safe and idempotent. A body no parser fetched
+(e.g. a `text/plain` POST) also passes through untouched. The `datastar` value
+is decoded only when the body has no token, and only up to `:max_bytes` — set
+it to your smallest `:max_signal_bytes`
+(`plug Dstar.Plugs.RenameCsrfParam, max_bytes: 64_000`).
+
+> **Minimum `plug_crypto` version:** Ensure your app resolves `plug_crypto >= 2.2.1`
+> (patches CVE-2026-105963). `RenameCsrfParam` also ignores non-binary token values
+> so wrong-typed request data never reaches `Plug.Crypto`.
+
+> **Development error relay (`debug_errors`):** Setting
+> `config :dstar, debug_errors: true` (in `config/dev.exs` **only**) relays
+> scrubbed `Dstar.Page` callback crashes to the browser console over the open
+> SSE stream. Never enable it in production.
 
 When more than one token is present, `RenameCsrfParam` only writes
 `body_params["_csrf_token"]` if that key is missing, in this order:

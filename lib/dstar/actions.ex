@@ -393,7 +393,15 @@ defmodule Dstar.Actions do
   @doc """
   Decodes a URL-safe module name back to an Elixir module.
 
-  Returns `{:ok, module}` if the module exists, `:error` otherwise.
+  Returns `{:ok, module}` if the module atom already exists, `:error` otherwise.
+
+  > #### Security: always enforce an allowlist {: .warning}
+  >
+  > This function resolves **any** existing `Elixir.*` atom in the VM
+  > (including standard-library modules such as `System`, `File`, or `Code`).
+  > Never dispatch dynamically onto the returned module from untrusted input
+  > without checking it against an explicit allowlist. Prefer
+  > `Dstar.Plugs.Dispatch`, which matches against a pre-built allowlist map.
 
   ## Examples
 

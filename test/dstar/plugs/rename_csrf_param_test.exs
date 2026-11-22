@@ -35,6 +35,14 @@ defmodule Dstar.Plugs.RenameCsrfParamTest do
                max_bytes: Dstar.Signals.default_max_bytes()
              }
     end
+
+    test "raises on invalid :max_bytes" do
+      for bad <- [nil, 0, -1, "64000"] do
+        assert_raise ArgumentError, ~r/:max_bytes must be a positive integer/, fn ->
+          RenameCsrfParam.init(max_bytes: bad)
+        end
+      end
+    end
   end
 
   describe "call/2" do

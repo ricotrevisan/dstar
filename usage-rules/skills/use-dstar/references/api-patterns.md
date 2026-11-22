@@ -98,11 +98,19 @@ defmodule MyAppWeb.TodoController do
     signals = Dstar.read_signals(conn)
     todo_id = signals["deleting_id"]
     
-    {:ok, _} = Todos.delete_todo(todo_id)
-    
-    conn
-    |> Dstar.start()
-    |> Dstar.remove_elements("#todo-#{todo_id}")
+    # Authorize ownership before mutating or starting SSE, and build the DOM
+    # selector from the verified record id rather than raw signal input.
+    case Todos.delete_for_user(conn.assigns.current_user, todo_id) do
+      {:ok, todo} ->
+        conn
+        |> Dstar.start()
+        |> Dstar.remove_elements("#todo-#{todo.id}")
+
+      :error ->
+        conn
+        |> Plug.Conn.send_resp(403, "Forbidden")
+        |> Plug.Conn.halt()
+    end
   end
 end
 ```
@@ -388,7 +396,7 @@ end
 </html>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and the verb helpers.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and state-changing verb helpers (`post`, `put`, `patch`, `delete`). `Plug.CSRFProtection` skips `GET`, `HEAD`, and `OPTIONS`, so keep `GET` handlers safe and idempotent. Ensure your app resolves `plug_crypto >= 2.2.1` (CVE-2026-105963).
 
 The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`. The plug skips GET/HEAD/OPTIONS (never CSRF-checked) and decodes `datastar` only when the body has no token, up to `:max_bytes`. Only binary values are treated as tokens; anything else (nil, list, number) is ignored so wrong-typed request data never reaches the crypto paths (see CVE-2026-105963).
 
@@ -577,21 +585,25 @@ defmodule MyAppWeb.AuthController do
     |> Dstar.redirect("/login")
   end
   
+  @allowed_profile_sections ~w(avatar theme)
+
   def delete_profile_section(conn, _params) do
     signals = Dstar.read_signals(conn)
     section = signals["deleting_section"]
     
-    # Delete from database
-    {:ok, _} = Users.delete_profile_section(
-      conn.assigns.current_user,
-      section
-    )
-    
-    # Remove nested signal path
-    conn
-    |> Dstar.start()
-    |> Dstar.remove_signals("user.profile.#{section}")
-    |> Dstar.console_log("Profile section '#{section}' deleted")
+    if section in @allowed_profile_sections do
+      {:ok, _} = Users.delete_profile_section(conn.assigns.current_user, section)
+      
+      # Remove nested signal path (only allowlisted segments)
+      conn
+      |> Dstar.start()
+      |> Dstar.remove_signals("user.profile.#{section}")
+      |> Dstar.console_log("Profile section '#{section}' deleted")
+    else
+      conn
+      |> Plug.Conn.send_resp(400, "Invalid section")
+      |> Plug.Conn.halt()
+    end
   end
 end
 ```
@@ -645,44 +657,55 @@ defmodule MyAppWeb.ChartController do
   
   def update_formula(conn, _params) do
     signals = Dstar.read_signals(conn)
-    formula_id = signals["formula_id"]
-    
-    # Generate MathML
-    mathml = """
-    <math xmlns="http://www.w3.org/1998/Math/MathML">
-      <mrow>
-        <msup>
-          <mi>x</mi>
-          <mn>2</mn>
-        </msup>
-        <mo>+</mo>
-        <msup>
-          <mi>y</mi>
-          <mn>2</mn>
-        </msup>
-        <mo>=</mo>
-        <msup>
-          <mi>z</mi>
-          <mn>2</mn>
-        </msup>
-      </mrow>
-    </math>
-    """
-    
-    conn
-    |> Dstar.start()
-    |> Dstar.patch_elements(
-      mathml,
-      selector: "#formula-#{formula_id}",
-      namespace: :mathml
-    )
+
+    # Validate the id before interpolating it into a CSS selector.
+    case Integer.parse(to_string(signals["formula_id"] || "")) do
+      {formula_id, ""} ->
+        mathml = """
+        <math xmlns="http://www.w3.org/1998/Math/MathML">
+          <mrow>
+            <msup>
+              <mi>x</mi>
+              <mn>2</mn>
+            </msup>
+            <mo>+</mo>
+            <msup>
+              <mi>y</mi>
+              <mn>2</mn>
+            </msup>
+            <mo>=</mo>
+            <msup>
+              <mi>z</mi>
+              <mn>2</mn>
+            </msup>
+          </mrow>
+        </math>
+        """
+
+        conn
+        |> Dstar.start()
+        |> Dstar.patch_elements(
+          mathml,
+          selector: "#formula-#{formula_id}",
+          namespace: :mathml
+        )
+
+      _ ->
+        conn
+        |> Plug.Conn.send_resp(400, "Invalid formula id")
+        |> Plug.Conn.halt()
+    end
   end
   
   defp render_svg_chart(data) do
+    # Escape dynamic text (or render with ~H) — binary strings passed to
+    # patch_elements/3 are sent as raw HTML/SVG.
+    label = data.label |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
     """
     <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
       <rect x="50" y="#{250 - data.value * 2}" width="40" height="#{data.value * 2}" fill="#4CAF50"/>
-      <text x="70" y="280" text-anchor="middle">#{data.label}</text>
+      <text x="70" y="280" text-anchor="middle">#{label}</text>
     </svg>
     """
   end
