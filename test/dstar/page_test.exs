@@ -75,4 +75,28 @@ defmodule Dstar.PageTest do
   test "__dstar__(:idle_check) is overridable via use options" do
     assert TunedPage.__dstar__(:idle_check) == 50
   end
+
+  test "rejects invalid :idle_check and :max_signal_bytes at compile time" do
+    assert_raise ArgumentError, ~r/:idle_check must be a positive integer/, fn ->
+      Code.compile_quoted(
+        quote do
+          defmodule Dstar.PageTest.BadIdlePage do
+            use Dstar.Page, idle_check: 0
+            def render(assigns), do: ~H"<div>bad</div>"
+          end
+        end
+      )
+    end
+
+    assert_raise ArgumentError, ~r/:max_bytes must be a positive integer/, fn ->
+      Code.compile_quoted(
+        quote do
+          defmodule Dstar.PageTest.BadMaxBytesPage do
+            use Dstar.Page, max_signal_bytes: nil
+            def render(assigns), do: ~H"<div>bad</div>"
+          end
+        end
+      )
+    end
+  end
 end

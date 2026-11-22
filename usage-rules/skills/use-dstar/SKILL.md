@@ -203,7 +203,9 @@ data-signals:items="[]"          <%!-- Array --%>
 Supervise `Dstar.Utility.StreamRegistry`, add a sessionStorage-backed
 `data-signals:tab-id`, and define Page `stream_key/1` (preferred) or call
 `Dstar.Stream.open(conn, key: scope_key)` in a plain controller, then
-`Dstar.Stream.run/2` for the loop.
+`Dstar.Stream.run/2` for the loop. Always scope `scope_key` to the current
+user or session (e.g., `user.id`) so users cannot collide or replace each
+other's streams.
 
 Keyed claims are linearizable and fail closed. A claim failure returns a halted,
 non-SSE 503 conn (`{:error, conn}`) and must not enter `handle_connect`/`:connect`
@@ -233,7 +235,7 @@ end
 <body data-signals:csrf={Dstar.js_value(get_csrf_token())}>
 ```
 
-Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and the verb helpers.
+Because `csrf` is not `_`-prefixed, Datastar includes it in every request — as a body param for POST/PUT/PATCH, and in the `datastar` query parameter for GET/DELETE (those methods carry no body). `Dstar.Plugs.RenameCsrfParam` copies that value into `_csrf_token` for `Plug.CSRFProtection` from either channel. This one setup covers page events, stream connects, component events, and state-changing verb helpers (`post`, `put`, `patch`, `delete`). `Plug.CSRFProtection` skips `GET`, `HEAD`, and `OPTIONS`, so keep `GET` handlers safe and idempotent. Ensure your app resolves `plug_crypto >= 2.2.1` (CVE-2026-105963).
 
 The plug writes `body_params["_csrf_token"]` only when that key is missing, in this order: existing body `_csrf_token`, body `csrf`, `csrf` inside `datastar`, then a last-resort top-level `csrf` param. A query `_csrf_token` is not a source and does not hide a valid body or `datastar` token. `Plug.CSRFProtection` then checks the body token first, then `x-csrf-token`. The plug skips GET/HEAD/OPTIONS (never CSRF-checked) and decodes `datastar` only when the body has no token, up to `:max_bytes`. Only binary values are treated as tokens; anything else (nil, list, number) is ignored so wrong-typed request data never reaches the crypto paths (see CVE-2026-105963).
 
@@ -296,12 +298,13 @@ post "/ds/:module/:event", Dstar.Plugs.Dispatch,
 ```elixir
 defmodule MyApp.TodoHandler do
   def handle_event(conn, "add", signals) do
-    todo = %{id: UUID.uuid4(), text: signals["new_todo"], done: false}
-    # Save to DB
+    user = conn.assigns.current_user
+    {:ok, _todo} = Todos.create_todo(user, %{text: signals["new_todo"]})
+    todos = Todos.list_for_user(user)
     
     conn
     |> Dstar.start()
-    |> Dstar.patch_signals(%{new_todo: "", todos: [todo | signals["todos"]]})
+    |> Dstar.patch_signals(%{new_todo: "", todos: todos})
   end
   
   def handle_event(conn, "toggle", signals) do

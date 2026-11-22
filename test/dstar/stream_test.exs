@@ -308,5 +308,15 @@ defmodule Dstar.StreamTest do
       assert_received {:probe, ": \n\n"}
       assert_received :disconnected
     end
+
+    test "rejects non-positive or non-integer :idle_check" do
+      {:ok, conn} = Stream.open(conn(:post, "/stream"))
+
+      for bad <- [0, -10, nil, "50"] do
+        assert_raise ArgumentError, ~r/:idle_check must be a positive integer/, fn ->
+          Stream.run(conn, idle_check: bad)
+        end
+      end
+    end
   end
 end

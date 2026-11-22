@@ -409,6 +409,33 @@ defmodule Dstar.Utility.StreamRegistryTest do
 
       refute Map.has_key?(conn.private, :dstar_stream_claim)
     end
+
+    test "a stalled coordinator times out and fails closed with 503 without leaking a claim" do
+      scope = make_ref()
+      registry = Process.whereis(StreamRegistry)
+      :ok = :sys.suspend(registry)
+
+      conn =
+        try do
+          StreamRegistry.start_stream(stream_conn("stalled-tab"), scope, claim_timeout: 50)
+        after
+          :ok = :sys.resume(registry)
+        end
+
+      assert conn.status == 503
+      assert conn.state == :sent
+      assert conn.halted
+      refute Map.has_key?(conn.private, :dstar_stream_claim)
+      assert StreamRegistry.owner({scope, "stalled-tab"}) == :error
+    end
+
+    test "rejects invalid :claim_timeout" do
+      for bad <- [0, -1, nil, "5000"] do
+        assert_raise ArgumentError, ~r/:claim_timeout must be a positive integer/, fn ->
+          StreamRegistry.start_stream(stream_conn("tab-1"), make_ref(), claim_timeout: bad)
+        end
+      end
+    end
   end
 
   describe "tab_id/1" do

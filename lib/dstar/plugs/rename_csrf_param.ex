@@ -28,7 +28,9 @@ defmodule Dstar.Plugs.RenameCsrfParam do
     `Plug.CSRFProtection` *does* check — pass validation too.
 
   The plug checks both channels, so one setup covers page `event()` POSTs,
-  stream `connect()` POSTs, component events, and all verb helpers.
+  stream `connect()` POSTs, component events, and state-changing verb helpers
+  (`post`/`put`/`patch`/`delete`). `Plug.CSRFProtection` skips `GET`, `HEAD`,
+  and `OPTIONS`, so any `GET` route must remain safe and idempotent.
 
   Only **binary** values count as tokens. If a source carries any other
   type (`nil`, a list from `csrf[]=x`, a number or object from a JSON
@@ -110,7 +112,10 @@ defmodule Dstar.Plugs.RenameCsrfParam do
     %{
       from: Keyword.get(opts, :from, "csrf"),
       datastar_param: Keyword.get(opts, :datastar_param, @default_datastar_param),
-      max_bytes: Keyword.get(opts, :max_bytes, Dstar.Signals.default_max_bytes())
+      max_bytes:
+        Dstar.Signals.validate_max_bytes!(
+          Keyword.get(opts, :max_bytes, Dstar.Signals.default_max_bytes())
+        )
     }
   end
 

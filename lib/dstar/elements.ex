@@ -29,6 +29,12 @@ defmodule Dstar.Elements do
   The `html` argument may be `nil` when using `mode: :remove` (elements
   are not needed for removal).
 
+  > #### Raw HTML vs. HEEx {: .warning}
+  >
+  > Binary strings are sent verbatim without HTML escaping. Pass HEEx output
+  > (`~H` / `Phoenix.HTML.safe()`) whenever rendering untrusted or user-supplied
+  > data.
+
   ## Options
 
   - `:selector` - CSS selector for target elements (optional — defaults to element ID)

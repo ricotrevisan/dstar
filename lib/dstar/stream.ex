@@ -84,8 +84,11 @@ defmodule Dstar.Stream do
   def open(%Plug.Conn{} = conn, opts \\ []) do
     conn =
       case Keyword.fetch(opts, :key) do
-        {:ok, key} -> StreamRegistry.start_stream(conn, key, Keyword.take(opts, [:max_bytes]))
-        :error -> Dstar.SSE.start(conn)
+        {:ok, key} ->
+          StreamRegistry.start_stream(conn, key, Keyword.take(opts, [:max_bytes, :claim_timeout]))
+
+        :error ->
+          Dstar.SSE.start(conn)
       end
 
     if conn.state == :chunked, do: {:ok, conn}, else: {:error, conn}
@@ -115,11 +118,13 @@ defmodule Dstar.Stream do
   """
   @spec run(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def run(%Plug.Conn{} = conn, opts \\ []) do
+    idle_check = validate_idle_check!(Keyword.get(opts, :idle_check, @default_idle_check))
+
     callbacks = %{
       info: Keyword.get(opts, :info, &unhandled/2),
       replaced: Keyword.get(opts, :replaced, fn _msg, conn -> conn end),
       disconnect: Keyword.get(opts, :disconnect, fn _conn -> :ok end),
-      idle_check: Keyword.get(opts, :idle_check, @default_idle_check)
+      idle_check: idle_check
     }
 
     connect = Keyword.get(opts, :connect, & &1)
@@ -130,6 +135,13 @@ defmodule Dstar.Stream do
       # Idempotent: a normal exit already released in teardown/2.
       StreamRegistry.release(conn)
     end
+  end
+
+  @doc false
+  def validate_idle_check!(ms) when is_integer(ms) and ms > 0, do: ms
+
+  def validate_idle_check!(value) do
+    raise ArgumentError, ":idle_check must be a positive integer, got: #{inspect(value)}"
   end
 
   # The probe runs on an absolute deadline, not "idle_check ms after the

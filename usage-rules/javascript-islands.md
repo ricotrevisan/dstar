@@ -40,7 +40,9 @@ class PlainEditor extends HTMLElement {
     this._box = document.createElement("div");
     this._box.contentEditable = "true";
     this._box.className = "plain-editor__box";
-    this._box.innerHTML = this.dataset.content || "";
+    // Security: sanitize HTML before assigning to innerHTML (e.g. DOMPurify
+    // or server-side HTML sanitization). For plain text, use `textContent`.
+    this._box.innerHTML = sanitizeHtml(this.dataset.content || "");
     // state out: user edits -> dispatch input so data-bind writes el.value -> signal
     this._box.addEventListener("input", () => {
       if (this._applying) return;
@@ -62,9 +64,10 @@ class PlainEditor extends HTMLElement {
 
   set value(html) {
     if (!this._box) { this.dataset.content = html || ""; return; } // not yet mounted — stash so connectedCallback applies it
-    if ((html || "") === this._box.innerHTML) return;              // idempotent
+    const safeHtml = sanitizeHtml(html || "");
+    if (safeHtml === this._box.innerHTML) return;              // idempotent
     this._applying = true;
-    this._box.innerHTML = html || "";
+    this._box.innerHTML = safeHtml;
     this._applying = false;
   }
 }

@@ -71,10 +71,32 @@ defmodule Mix.Tasks.Dstar.HttpsTest do
   end
 
   test "keeps the interactive options on the final prompt line" do
-    assert Https.prompt_intro("demo.test") =~
-             "browser-trusted HTTPS certificate with mkcert"
+    intro = Https.prompt_intro("demo.test", "127.0.0.2", "/tmp/custom-hosts")
 
+    assert intro =~ "browser-trusted HTTPS certificate with mkcert"
+    assert intro =~ "127.0.0.2 demo.test"
+    assert intro =~ "/tmp/custom-hosts"
     assert Https.prompt_question() == "Proceed with Dstar HTTPS setup? [Y/n] "
+  end
+
+  test "run/1 rejects a hostname with a trailing newline" do
+    assert_raise Mix.Error, ~r/Invalid DNS hostname/, fn ->
+      Https.run(["--yes", "--dry-run", "--host", "demo.test\n"])
+    end
+  end
+
+  test "run/1 raises before mkcert when hosts_file cannot be read" do
+    missing =
+      Path.join(System.tmp_dir!(), "dstar_https_missing_#{System.unique_integer([:positive])}")
+
+    output =
+      capture_io(fn ->
+        assert_raise Mix.Error, ~r/Could not read .*Refusing to modify/, fn ->
+          Https.run(["--yes", "--dry-run", "--host", "demo.test", "--hosts-file", missing])
+        end
+      end)
+
+    refute output =~ "mkcert"
   end
 
   test "run/1 raises before mkcert install when the host already points at a different IP" do

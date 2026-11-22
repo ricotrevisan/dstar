@@ -143,6 +143,10 @@ defmodule Dstar.Page do
   If defined, the stream atomically claims `{result, tabId}` through
   `Dstar.start_stream/2` before `handle_connect/2`. Optional.
 
+  Scope the key to the authenticated user or session (for example,
+  `conn.assigns.current_user.id` or `{user.id, workspace.id}`) so one user
+  cannot collide with or replace another user's stream.
+
   A valid keyed claim failure returns a halted non-SSE 503 and skips the
   connect callback/loop. Missing or invalid `tabId` is the intentional unkeyed
   fallback.
@@ -249,9 +253,12 @@ defmodule Dstar.Page do
 
       import Dstar.Page.Helpers
 
+      @dstar_idle_check Dstar.Stream.validate_idle_check!(unquote(idle_check))
+      @dstar_max_signal_bytes Dstar.Signals.validate_max_bytes!(unquote(max_signal_bytes))
+
       @doc false
-      def __dstar__(:idle_check), do: unquote(idle_check)
-      def __dstar__(:max_signal_bytes), do: unquote(max_signal_bytes)
+      def __dstar__(:idle_check), do: @dstar_idle_check
+      def __dstar__(:max_signal_bytes), do: @dstar_max_signal_bytes
     end
   end
 end

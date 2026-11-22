@@ -63,6 +63,7 @@ defmodule Dstar.Utility.StreamRegistry do
   @claim_private :dstar_stream_claim
   @max_tab_id_bytes 64
   @default_grace_ms 500
+  @default_claim_timeout 5_000
 
   @type claim :: reference()
   @type key :: term()
@@ -95,7 +96,13 @@ defmodule Dstar.Utility.StreamRegistry do
 
   Signals are fetched through `Dstar.Signals.fetch/2`. Malformed/non-object
   input receives 400 and oversized input receives 413 before any claim or SSE
-  start. Pass `max_bytes: n` as the third argument to change that input limit.
+  start. Pass `max_bytes: n` as the third argument to change that input limit,
+  or `claim_timeout: ms` (default #{@default_claim_timeout}) to bound how long
+  claiming the coordinator may wait before failing closed with 503.
+
+  Always scope `scope_key` to the authenticated user or session (for example,
+  `current_user.id` or `{user.id, workspace.id}`) so one user cannot collide
+  with or replace another user's stream.
 
   With a usable `tabId`, the claim is fail-closed: success stores its ownership
   generation in `conn.private` and starts SSE; coordinator failure returns a
@@ -104,16 +111,19 @@ defmodule Dstar.Utility.StreamRegistry do
   """
   @spec start_stream(Plug.Conn.t(), term(), keyword()) :: Plug.Conn.t()
   def start_stream(conn, scope_key, opts \\ []) do
-    case Dstar.Signals.fetch(conn, opts) do
+    claim_timeout =
+      validate_claim_timeout!(Keyword.get(opts, :claim_timeout, @default_claim_timeout))
+
+    case Dstar.Signals.fetch(conn, Keyword.take(opts, [:max_bytes])) do
       {:ok, signals, conn} ->
-        start_fetched_stream(conn, scope_key, signals)
+        start_fetched_stream(conn, scope_key, signals, claim_timeout)
 
       {:error, reason, conn} ->
         Dstar.Signals.send_error(conn, reason)
     end
   end
 
-  defp start_fetched_stream(conn, scope_key, signals) do
+  defp start_fetched_stream(conn, scope_key, signals, claim_timeout) do
     case tab_id(signals) do
       nil ->
         Dstar.start(conn)
@@ -121,7 +131,7 @@ defmodule Dstar.Utility.StreamRegistry do
       tab_id ->
         key = {scope_key, tab_id}
 
-        case claim(key) do
+        case claim(key, claim_timeout) do
           {:ok, generation} ->
             conn = Plug.Conn.put_private(conn, @claim_private, %{key: key, claim: generation})
 
@@ -176,18 +186,26 @@ defmodule Dstar.Utility.StreamRegistry do
     end
   end
 
-  defp claim(key) do
+  defp claim(key, timeout \\ @default_claim_timeout) do
     case Process.whereis(@registry) do
       nil ->
         {:error, :not_running}
 
       registry ->
+        deadline = System.monotonic_time(:millisecond) + timeout
+
         try do
-          GenServer.call(registry, {:claim, key}, :infinity)
+          GenServer.call(registry, {:claim, key, deadline}, timeout)
         catch
           :exit, reason -> {:error, {:registry_exit, reason}}
         end
     end
+  end
+
+  defp validate_claim_timeout!(ms) when is_integer(ms) and ms > 0, do: ms
+
+  defp validate_claim_timeout!(value) do
+    raise ArgumentError, ":claim_timeout must be a positive integer, got: #{inspect(value)}"
   end
 
   @doc """
@@ -212,7 +230,7 @@ defmodule Dstar.Utility.StreamRegistry do
 
       registry ->
         try do
-          GenServer.call(registry, {:release_claim, claim}, :infinity)
+          GenServer.call(registry, {:release_claim, claim}, @default_claim_timeout)
         catch
           :exit, _reason -> :ok
         end
@@ -236,7 +254,7 @@ defmodule Dstar.Utility.StreamRegistry do
 
       registry ->
         try do
-          GenServer.call(registry, :release, :infinity)
+          GenServer.call(registry, :release, @default_claim_timeout)
         catch
           :exit, _reason -> :ok
         end
@@ -292,7 +310,44 @@ defmodule Dstar.Utility.StreamRegistry do
   def public_replacement({:EXIT, pid, {:replaced, _claim}}), do: {:EXIT, pid, :replaced}
 
   @impl GenServer
-  def handle_call({:claim, key}, {pid, _tag}, state) do
+  def handle_call({:claim, key, deadline}, from, state) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      {:reply, {:error, :timeout}, state}
+    else
+      do_claim(key, from, state)
+    end
+  end
+
+  def handle_call({:claim, key}, from, state) do
+    do_claim(key, from, state)
+  end
+
+  def handle_call({:release_claim, token}, {pid, _tag}, state) do
+    state =
+      case Map.get(state.claims, token) do
+        %{pid: ^pid} -> drop_claim(state, token)
+        _stale_or_foreign -> state
+      end
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:release, {pid, _tag}, state) do
+    state = state.owned |> Map.get(pid, []) |> Enum.reduce(state, &drop_claim(&2, &1))
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:owner, key}, _from, state) do
+    reply =
+      case active_claim(state, key) do
+        %{pid: pid, token: token} -> {:ok, pid, token}
+        nil -> :error
+      end
+
+    {:reply, reply, state}
+  end
+
+  defp do_claim(key, {pid, _tag}, state) do
     case active_claim(state, key) do
       %{pid: ^pid, token: token} ->
         {:reply, {:ok, token}, state}
@@ -321,31 +376,6 @@ defmodule Dstar.Utility.StreamRegistry do
 
         {:reply, {:ok, token}, state}
     end
-  end
-
-  def handle_call({:release_claim, token}, {pid, _tag}, state) do
-    state =
-      case Map.get(state.claims, token) do
-        %{pid: ^pid} -> drop_claim(state, token)
-        _stale_or_foreign -> state
-      end
-
-    {:reply, :ok, state}
-  end
-
-  def handle_call(:release, {pid, _tag}, state) do
-    state = state.owned |> Map.get(pid, []) |> Enum.reduce(state, &drop_claim(&2, &1))
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:owner, key}, _from, state) do
-    reply =
-      case active_claim(state, key) do
-        %{pid: pid, token: token} -> {:ok, pid, token}
-        nil -> :error
-      end
-
-    {:reply, reply, state}
   end
 
   @impl GenServer

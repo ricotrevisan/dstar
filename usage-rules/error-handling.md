@@ -150,11 +150,18 @@ def handle_event(conn, "risky_action", signals) do
     |> Dstar.patch_signals(%{result: result, error: nil})
   rescue
     e ->
+      # Never log raw `signals` (they carry `csrf` and form fields) or raw
+      # stacktrace argument lists. Scrub frames to arities before formatting.
+      stacktrace =
+        Enum.map(__STACKTRACE__, fn
+          {m, f, args, loc} when is_list(args) -> {m, f, length(args), loc}
+          frame -> frame
+        end)
+
       Logger.error("""
       Handler crashed on risky_action:
         Error: #{Exception.message(e)}
-        Signals: #{inspect(signals)}
-        Stacktrace: #{Exception.format_stacktrace(__STACKTRACE__)}
+        Stacktrace: #{Exception.format_stacktrace(stacktrace)}
       """)
       
       # Connection already started, just send error signals
@@ -209,25 +216,30 @@ defmodule MyAppWeb.EventHelpers do
   
   Usage:
     def handle_event(conn, "action", signals) do
-      with_error_recovery(conn, "action", signals, fn conn ->
+      with_error_recovery(conn, "action", fn conn ->
         conn
         |> process_action(signals)
       end)
     end
   """
-  def with_error_recovery(conn, event_name, signals, handler_fn) do
+  def with_error_recovery(conn, event_name, handler_fn) do
     try do
       conn
       |> Dstar.start()
       |> handler_fn.()
     rescue
       e ->
+        stacktrace =
+          Enum.map(__STACKTRACE__, fn
+            {m, f, args, loc} when is_list(args) -> {m, f, length(args), loc}
+            frame -> frame
+          end)
+
         Logger.error("""
         Event handler crashed:
           Event: #{event_name}
           Error: #{Exception.message(e)}
-          Signals: #{inspect(signals)}
-          Stacktrace: #{Exception.format_stacktrace(__STACKTRACE__)}
+          Stacktrace: #{Exception.format_stacktrace(stacktrace)}
         """)
         
         conn
@@ -260,13 +272,15 @@ What happens when a send fails in a streaming loop? How to detect disconnections
 defmodule MyAppWeb.StreamHandler do
   require Logger
   
-  def handle_event(conn, "subscribe_updates", %{"topic" => topic}) do
-    # Subscribe to PubSub
+  def handle_event(conn, "subscribe_updates", _signals) do
+    # Build PubSub topics from server-verified auth state — never subscribe
+    # directly to a raw client-supplied topic string from signals.
+    topic = "user:#{conn.assigns.current_user.id}:updates"
     Phoenix.PubSub.subscribe(MyApp.PubSub, topic)
     
     conn
     |> Dstar.start()
-    |> Dstar.patch_signals(%{subscribed: true, topic: topic})
+    |> Dstar.patch_signals(%{subscribed: true})
     |> stream_loop(topic)
   end
   
@@ -378,7 +392,7 @@ end
 
 ## 4. Page and Dispatch Error Handling
 
-`Dstar.Page` callbacks (`handle_event/3`, `handle_connect/2`, `handle_info/2`) that raise are logged and re-raised. Set `config :dstar, debug_errors: true` in `dev.exs` to also see the exception in the browser console.
+`Dstar.Page` callbacks (`handle_event/3`, `handle_connect/2`, `handle_info/2`) that raise are logged (with stacktrace arguments and sensitive exception fields scrubbed) and re-raised. Set `config :dstar, debug_errors: true` in `config/dev.exs` **only** (never in production) to also relay the scrubbed error to the browser console.
 
 `Dstar.Plugs.Dispatch` lets crashes bubble up. Use Phoenix's error handling (ErrorView) or a custom plug for catch-all.
 
@@ -401,11 +415,17 @@ defmodule MyAppWeb.Plugs.DstarErrorHandler do
         send_dstar_error(conn, "The requested resource was not found or has been modified.")
         
       e ->
+        stacktrace =
+          Enum.map(__STACKTRACE__, fn
+            {m, f, args, loc} when is_list(args) -> {m, f, length(args), loc}
+            frame -> frame
+          end)
+
         Logger.error("""
         Unhandled error in Dstar pipeline:
           Error: #{Exception.message(e)}
           Path: #{conn.request_path}
-          Stacktrace: #{Exception.format_stacktrace(__STACKTRACE__)}
+          Stacktrace: #{Exception.format_stacktrace(stacktrace)}
         """)
         send_dstar_error(conn, "An unexpected error occurred. Please refresh and try again.")
     end
@@ -781,5 +801,5 @@ Show all errors in a summary block:
 **Remember:**
 - `Dstar.start(conn)` is safe to call multiple times (returns chunked conn as-is)
 - After `start()`, all `Dstar.patch_*` functions just send more chunks—no risk of "double response"
-- Always log unexpected errors with context (event name, signals, stacktrace)
+- Always log unexpected errors with context (event name, scrubbed stacktrace) — never log raw `signals` or unscrubbed stacktrace argument lists (they carry `csrf`, cookies, and form secrets)
 - For long-running streams, use heartbeats and `check_connection/1` to detect disconnects early

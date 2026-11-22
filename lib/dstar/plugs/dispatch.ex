@@ -56,7 +56,10 @@ defmodule Dstar.Plugs.Dispatch do
 
     %{
       lookup: lookup,
-      max_signal_bytes: Keyword.get(opts, :max_signal_bytes, Dstar.Signals.default_max_bytes())
+      max_signal_bytes:
+        Dstar.Signals.validate_max_bytes!(
+          Keyword.get(opts, :max_signal_bytes, Dstar.Signals.default_max_bytes())
+        )
     }
   end
 
@@ -91,7 +94,7 @@ defmodule Dstar.Plugs.Dispatch do
 
       Logger.error(
         "Dstar.Plugs.Dispatch: #{inspect(module)}.handle_event(#{inspect(event, printable_limit: 100)}) raised:\n" <>
-          Exception.format(:error, exception, stacktrace)
+          Dstar.CrashReport.format(exception, stacktrace)
       )
 
       reraise exception, stacktrace
