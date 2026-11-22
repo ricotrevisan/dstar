@@ -26,7 +26,7 @@ everything around it.
 
 ## Minimal example
 
-`<plain-editor>` wraps a JS-managed `contenteditable` div.
+`<plain-editor>` wraps a JS-managed `<textarea>`.
 
 ```heex
 <plain-editor id="note-1" data-bind="note" data-ignore-morph data-content={@note}></plain-editor>
@@ -37,12 +37,12 @@ everything around it.
 class PlainEditor extends HTMLElement {
   connectedCallback() {
     if (this._box) return; // already mounted (e.g. re-connected after a morph move)
-    this._box = document.createElement("div");
-    this._box.contentEditable = "true";
+    this._box = document.createElement("textarea");
     this._box.className = "plain-editor__box";
-    // Security: sanitize HTML before assigning to innerHTML (e.g. DOMPurify
-    // or server-side HTML sanitization). For plain text, use `textContent`.
-    this._box.innerHTML = sanitizeHtml(this.dataset.content || "");
+    // Plain-text island uses textarea.value (safe against XSS and preserves
+    // line breaks). If an island renders rich HTML with `innerHTML`, sanitize
+    // it first (e.g. DOMPurify or server-side HTML sanitization).
+    this._box.value = this.dataset.content || "";
     // state out: user edits -> dispatch input so data-bind writes el.value -> signal
     this._box.addEventListener("input", () => {
       if (this._applying) return;
@@ -59,15 +59,15 @@ class PlainEditor extends HTMLElement {
   }
 
   get value() {
-    return this._box ? this._box.innerHTML : (this.dataset.content || "");
+    return this._box ? this._box.value : (this.dataset.content || "");
   }
 
-  set value(html) {
-    if (!this._box) { this.dataset.content = html || ""; return; } // not yet mounted — stash so connectedCallback applies it
-    const safeHtml = sanitizeHtml(html || "");
-    if (safeHtml === this._box.innerHTML) return;              // idempotent
+  set value(text) {
+    const next = text || "";
+    if (!this._box) { this.dataset.content = next; return; } // not yet mounted — stash so connectedCallback applies it
+    if (next === this._box.value) return;                     // idempotent
     this._applying = true;
-    this._box.innerHTML = safeHtml;
+    this._box.value = next;
     this._applying = false;
   }
 }
@@ -88,7 +88,7 @@ Drive it from the server:
 ```elixir
 # content in: patch the bound signal; the element's value setter applies it
 def handle_event(conn, "seed", _signals) do
-  Dstar.patch_signals(conn, %{note: "<p>Hello from the server</p>"})
+  Dstar.patch_signals(conn, %{note: "Hello from the server"})
 end
 
 # command in: dispatch a CustomEvent at the element by id

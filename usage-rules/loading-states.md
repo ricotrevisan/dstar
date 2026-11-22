@@ -212,10 +212,10 @@ Use `data-class` to apply loading styles:
 **With list items:**
 
 ```heex
-<div data-signals:_deleting="false">
-  <div :for={item <- @items} data-class:opacity-30={"$_deleting == #{Dstar.js_value(item.id)}"}>
+<div data-signals:_deleting_id="null" data-signals:_deleting="false">
+  <div :for={item <- @items} data-class:opacity-30={"$_deleting && $_deleting_id == #{Dstar.js_value(item.id)}"}>
     {item.name}
-    <button data-on:click={"$_deleting = #{Dstar.js_value(item.id)}; #{Dstar.post(ItemHandler, "delete:#{item.id}")}"}
+    <button data-on:click={"$_deleting_id = #{Dstar.js_value(item.id)}; #{Dstar.post(ItemHandler, "delete:#{item.id}")}"}
             data-indicator="_deleting">
       Delete
     </button>
@@ -308,34 +308,44 @@ Each button has its own loading state that doesn't interfere with others.
 Show immediate feedback, rollback on error:
 
 ```heex
-<div data-signals:items="[]" data-signals:_updating="null">
-  <div :for={item <- @items} data-class:opacity-50={"$_updating == #{Dstar.js_value(item.id)}"}>
+<div data-signals:items={Dstar.js_value(@items)} data-signals:_prev_items="[]" data-signals:_updating_id="null" data-signals:_toggling="false">
+  <div :for={item <- @items} data-class:opacity-50={"$_toggling && $_updating_id == #{Dstar.js_value(item.id)}"}>
     <input type="checkbox"
            checked={item.completed}
-           data-on:click={"$_updating = #{Dstar.js_value(item.id)}; $items = $items.map(i => i.id == #{Dstar.js_value(item.id)} ? {...i, completed: !i.completed} : i); #{Dstar.post(ItemHandler, "toggle:#{item.id}")}"}
-           data-indicator="_updating">
+           data-attr:disabled="$_toggling"
+           data-effect={"el.checked = Boolean($items.find(i => i.id == #{Dstar.js_value(item.id)})?.completed)"}
+           data-on:click={"$_prev_items = $items; $_updating_id = #{Dstar.js_value(item.id)}; $items = $items.map(i => i.id == #{Dstar.js_value(item.id)} ? {...i, completed: el.checked} : i); #{Dstar.post(ItemHandler, "toggle:#{item.id}")}"}
+           data-on:datastar-fetch__document="if (evt.detail.el === el && evt.detail.type === 'error') { $items = $_prev_items; $_updating_id = null }"
+           data-indicator="_toggling">
     {item.name}
   </div>
 </div>
 ```
 
 ```elixir
-def handle_event(conn, "toggle", %{"id" => id}) do
-  case toggle_item(id) do
-    {:ok, item} ->
+def handle_event(conn, "toggle:" <> id, _signals) do
+  user = conn.assigns.current_user
+
+  case toggle_item_for_user(user, id) do
+    {:ok, _item} ->
       conn
       |> Dstar.start()
       |> Dstar.patch_signals(%{
-        items: get_all_items(),  # Server state is source of truth
-        _updating: nil
+        items: list_items_for_user(user),  # Server state is source of truth
+        _updating_id: nil
       })
-    
+
+    {:error, :unauthorized} ->
+      conn
+      |> Plug.Conn.send_resp(403, "Forbidden")
+      |> Plug.Conn.halt()
+
     {:error, _reason} ->
       conn
       |> Dstar.start()
       |> Dstar.patch_signals(%{
-        items: get_all_items(),  # Rollback
-        _updating: nil,
+        items: list_items_for_user(user),  # Rollback
+        _updating_id: nil,
         error: "Failed to update item"
       })
   end

@@ -234,15 +234,19 @@ if Code.ensure_loaded?(Phoenix.Controller) do
 
     defp crash(page, callback, conn, exception, stacktrace) do
       # Scrubbed once for the log, the console relay and the re-raise: raw
-      # frames carry the conn and signals (see Dstar.CrashReport).
+      # frames and exception terms can carry the conn and signals (see
+      # Dstar.CrashReport).
+      exception = Dstar.CrashReport.scrub_exception(exception)
       stacktrace = Dstar.CrashReport.scrub(stacktrace)
-      log_crash(page, callback, exception, stacktrace)
+      formatted = Exception.format(:error, exception, stacktrace)
+
+      Logger.error("Dstar.Page.Plug: #{inspect(page)}.#{callback} raised:\n" <> formatted)
 
       if Application.get_env(:dstar, :debug_errors, false) do
         # Best-effort: if the conn died mid-stream, console_log raising
         # here would shadow the original exception.
         try do
-          Dstar.console_log(conn, Dstar.CrashReport.format(exception, stacktrace), level: :error)
+          Dstar.console_log(conn, formatted, level: :error)
         rescue
           _ -> :ok
         end

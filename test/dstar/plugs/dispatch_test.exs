@@ -368,9 +368,13 @@ defmodule Dstar.Plugs.DispatchTest do
 
       log =
         capture_log(fn ->
-          assert_raise MatchError, fn ->
-            Dispatch.call(conn, opts)
-          end
+          exception =
+            assert_raise MatchError, fn ->
+              Dispatch.call(conn, opts)
+            end
+
+          refute inspect(exception.term) =~ "hunter2"
+          refute inspect(exception.term) =~ "SECRET-CSRF"
         end)
 
       assert log =~ "MatchError"

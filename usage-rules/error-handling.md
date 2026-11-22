@@ -150,8 +150,8 @@ def handle_event(conn, "risky_action", signals) do
     |> Dstar.patch_signals(%{result: result, error: nil})
   rescue
     e ->
-      # Never log raw `signals` (they carry `csrf` and form fields) or raw
-      # stacktrace argument lists. Scrub frames to arities before formatting.
+      # Never log raw `signals`, `Exception.message(e)` (MatchError/KeyError
+      # embed the failing term), or raw stacktrace argument lists.
       stacktrace =
         Enum.map(__STACKTRACE__, fn
           {m, f, args, loc} when is_list(args) -> {m, f, length(args), loc}
@@ -160,7 +160,7 @@ def handle_event(conn, "risky_action", signals) do
 
       Logger.error("""
       Handler crashed on risky_action:
-        Error: #{Exception.message(e)}
+        Error: #{inspect(e.__struct__)}
         Stacktrace: #{Exception.format_stacktrace(stacktrace)}
       """)
       
@@ -195,7 +195,7 @@ def handle_event(conn, "early_crash", signals) do
     |> process_and_respond(signals)
   rescue
     e ->
-      Logger.error("Handler crashed: #{Exception.message(e)}")
+      Logger.error("Handler crashed: #{inspect(e.__struct__)}")
       
       # Safe: call start() if needed, then send error
       conn
@@ -238,7 +238,7 @@ defmodule MyAppWeb.EventHelpers do
         Logger.error("""
         Event handler crashed:
           Event: #{event_name}
-          Error: #{Exception.message(e)}
+          Error: #{inspect(e.__struct__)}
           Stacktrace: #{Exception.format_stacktrace(stacktrace)}
         """)
         
@@ -423,7 +423,7 @@ defmodule MyAppWeb.Plugs.DstarErrorHandler do
 
         Logger.error("""
         Unhandled error in Dstar pipeline:
-          Error: #{Exception.message(e)}
+          Error: #{inspect(e.__struct__)}
           Path: #{conn.request_path}
           Stacktrace: #{Exception.format_stacktrace(stacktrace)}
         """)

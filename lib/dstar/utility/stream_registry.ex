@@ -232,6 +232,9 @@ defmodule Dstar.Utility.StreamRegistry do
         try do
           GenServer.call(registry, {:release_claim, claim}, @default_claim_timeout)
         catch
+          # Surface timeout rather than returning :ok while the coordinator
+          # may still hold and escalate this generation against a reused conn.
+          :exit, {:timeout, _} = reason -> exit(reason)
           :exit, _reason -> :ok
         end
     end
@@ -256,6 +259,7 @@ defmodule Dstar.Utility.StreamRegistry do
         try do
           GenServer.call(registry, :release, @default_claim_timeout)
         catch
+          :exit, {:timeout, _} = reason -> exit(reason)
           :exit, _reason -> :ok
         end
     end
@@ -316,10 +320,6 @@ defmodule Dstar.Utility.StreamRegistry do
     else
       do_claim(key, from, state)
     end
-  end
-
-  def handle_call({:claim, key}, from, state) do
-    do_claim(key, from, state)
   end
 
   def handle_call({:release_claim, token}, {pid, _tag}, state) do

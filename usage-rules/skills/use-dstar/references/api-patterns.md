@@ -659,8 +659,23 @@ defmodule MyAppWeb.ChartController do
     signals = Dstar.read_signals(conn)
 
     # Validate the id before interpolating it into a CSS selector.
-    case Integer.parse(to_string(signals["formula_id"] || "")) do
-      {formula_id, ""} ->
+    formula_id =
+      case signals["formula_id"] do
+        id when is_integer(id) and id > 0 ->
+          {:ok, id}
+
+        id when is_binary(id) ->
+          case Integer.parse(id) do
+            {parsed, ""} when parsed > 0 -> {:ok, parsed}
+            _ -> :error
+          end
+
+        _ ->
+          :error
+      end
+
+    case formula_id do
+      {:ok, formula_id} ->
         mathml = """
         <math xmlns="http://www.w3.org/1998/Math/MathML">
           <mrow>

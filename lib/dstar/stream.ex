@@ -118,23 +118,46 @@ defmodule Dstar.Stream do
   """
   @spec run(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def run(%Plug.Conn{} = conn, opts \\ []) do
-    idle_check = validate_idle_check!(Keyword.get(opts, :idle_check, @default_idle_check))
+    claim_conn = conn
 
-    callbacks = %{
-      info: Keyword.get(opts, :info, &unhandled/2),
-      replaced: Keyword.get(opts, :replaced, fn _msg, conn -> conn end),
-      disconnect: Keyword.get(opts, :disconnect, fn _conn -> :ok end),
-      idle_check: idle_check
-    }
+    {callbacks, exit_action} =
+      try do
+        idle_check = validate_idle_check!(Keyword.get(opts, :idle_check, @default_idle_check))
 
-    connect = Keyword.get(opts, :connect, & &1)
+        callbacks = %{
+          info: Keyword.get(opts, :info, &unhandled/2),
+          replaced: Keyword.get(opts, :replaced, fn _msg, conn -> conn end),
+          disconnect: Keyword.get(opts, :disconnect, fn _conn -> :ok end),
+          idle_check: idle_check,
+          claim_conn: claim_conn
+        }
 
-    try do
-      conn |> connect.() |> loop(callbacks, probe_deadline(callbacks))
-    after
-      # Idempotent: a normal exit already released in teardown/2.
-      StreamRegistry.release(conn)
-    end
+        connect = Keyword.get(opts, :connect, & &1)
+        result = conn |> connect.() |> loop(callbacks, probe_deadline(callbacks))
+        {callbacks, result}
+      catch
+        kind, reason ->
+          StreamRegistry.release(claim_conn)
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+
+    # Release once using the original conn that owns the claim metadata,
+    # before :replaced / :disconnect run — and outside the cleanup catch so
+    # release timeouts exit immediately and post-release callback crashes
+    # never call the registry a second time.
+    StreamRegistry.release(claim_conn)
+
+    final_conn =
+      case exit_action do
+        {:replaced, msg, loop_conn} ->
+          msg |> callbacks.replaced.(loop_conn) |> unwrap_halt()
+
+        {:done, loop_conn} ->
+          loop_conn
+      end
+
+    callbacks.disconnect.(final_conn)
+    final_conn
   end
 
   @doc false
@@ -162,7 +185,7 @@ defmodule Dstar.Stream do
   defp probe(conn, callbacks) do
     case Dstar.SSE.check_connection(conn) do
       {:ok, conn} -> loop(conn, callbacks, probe_deadline(callbacks))
-      {:error, conn} -> teardown(conn, callbacks)
+      {:error, conn} -> {:done, conn}
     end
   end
 
@@ -181,15 +204,8 @@ defmodule Dstar.Stream do
       # generation. A matching signal ends this stream; a stale generation
       # left in a reused keep-alive process's mailbox is ignored.
       {:EXIT, _pid, {:replaced, _claim}} = msg ->
-        if StreamRegistry.replacement_for?(conn, msg) do
-          # Release before application teardown. The coordinator can no
-          # longer escalate this generation while a slow callback cleans up.
-          StreamRegistry.release(conn)
-
-          StreamRegistry.public_replacement(msg)
-          |> callbacks.replaced.(conn)
-          |> unwrap_halt()
-          |> teardown(callbacks)
+        if StreamRegistry.replacement_for?(callbacks.claim_conn, msg) do
+          {:replaced, StreamRegistry.public_replacement(msg), conn}
         else
           loop(conn, callbacks, probe_at)
         end
@@ -205,23 +221,12 @@ defmodule Dstar.Stream do
       # the mailbox or the stream can stall when its send window drains.
       msg when not is_tuple(msg) or tuple_size(msg) != 2 or elem(msg, 0) != :bandit ->
         case callbacks.info.(msg, conn) do
-          {:halt, conn} -> teardown(conn, callbacks)
+          {:halt, conn} -> {:done, conn}
           conn -> loop(conn, callbacks, probe_at)
         end
     after
       timeout -> probe(conn, callbacks)
     end
-  end
-
-  # Registry entries and PubSub subscriptions are released when the owning
-  # process dies. Under HTTP/1.1 keep-alive the connection process does NOT
-  # die when the stream ends — it is reused for the next request on that
-  # socket — so without this everything the stream registered stays
-  # registered, owned by a process now serving unrelated traffic.
-  defp teardown(conn, callbacks) do
-    StreamRegistry.release(conn)
-    callbacks.disconnect.(conn)
-    conn
   end
 
   defp unwrap_halt({:halt, conn}), do: conn

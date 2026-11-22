@@ -128,7 +128,31 @@ defmodule Dstar.CrashReport do
   end
 
   defp scrub_term(term, filters, depth) when is_list(term) do
-    Enum.map(term, &scrub_term(&1, filters, depth + 1))
+    if key_value_list?(term) do
+      Enum.map(term, fn {key, value} ->
+        if sensitive_key?(key, filters) do
+          {key, "[FILTERED]"}
+        else
+          {key, scrub_term(value, filters, depth + 1)}
+        end
+      end)
+    else
+      scrub_list(term, filters, depth + 1)
+    end
+  end
+
+  # Preserve standalone result tuples under `{:keep, ...}` while still
+  # scrubbing their payload; keyword entries are handled in `key_value_list?/1`.
+  defp scrub_term({tag, value}, filters, depth) when tag in [:ok, :error] do
+    {tag, scrub_term(value, filters, depth + 1)}
+  end
+
+  defp scrub_term({key, value}, filters, depth) when is_binary(key) or is_atom(key) do
+    if sensitive_key?(key, filters) do
+      {key, "[FILTERED]"}
+    else
+      {key, scrub_term(value, filters, depth + 1)}
+    end
   end
 
   defp scrub_term(term, filters, depth) when is_tuple(term) do
@@ -139,6 +163,25 @@ defmodule Dstar.CrashReport do
   end
 
   defp scrub_term(term, _filters, _depth), do: term
+
+  defp key_value_list?([]), do: false
+  defp key_value_list?(list), do: proper_kv_list?(list)
+
+  defp proper_kv_list?([{key, _value} | rest]) when is_binary(key) or is_atom(key),
+    do: proper_kv_list?(rest)
+
+  defp proper_kv_list?([]), do: true
+  defp proper_kv_list?(_), do: false
+
+  defp scrub_list([], _filters, _depth), do: []
+
+  defp scrub_list([head | tail], filters, depth) when is_list(tail) do
+    [scrub_term(head, filters, depth) | scrub_list(tail, filters, depth)]
+  end
+
+  defp scrub_list([head | tail], filters, depth) do
+    [scrub_term(head, filters, depth) | scrub_term(tail, filters, depth)]
+  end
 
   defp sensitive_key?(key, {:discard, patterns}) when is_binary(key) or is_atom(key) do
     key_str = key |> to_string() |> String.downcase()
